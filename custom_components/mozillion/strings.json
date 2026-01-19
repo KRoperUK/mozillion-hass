@@ -1,0 +1,56 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Mozillion",
+        "description": "Connect to Mozillion to fetch data usage.",
+        "data": {
+          "name": "Name",
+          "email": "Email",
+          "password": "Password",
+          "totp_secret": "TOTP secret (Base32, optional)",
+          "origin": "Origin header (optional)",
+          "order_detail_id": "Order detail ID",
+          "sim_plan_id": "SIM plan ID",
+          "session_cookie": "Cookie header (optional if using login)",
+          "xsrf_token": "XSRF token header (optional)",
+          "usage_key": "Usage JSON key (dotted)",
+          "remaining_key": "Remaining JSON key (dotted)",
+          "scan_interval": "Scan interval (seconds)"
+        }
+      },
+      "select_plan": {
+        "title": "Select SIM Plan",
+        "description": "Choose your SIM plan from the list.",
+        "data": {
+          "plan": "SIM Plan"
+        }
+      },
+      "manual_ids": {
+        "title": "Enter IDs Manually",
+        "description": "Enter your order detail ID and SIM plan ID.",
+        "data": {
+          "order_detail_id": "Order detail ID",
+          "sim_plan_id": "SIM plan ID",
+          "sim_number": "SIM number (optional)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect, check cookies or credentials and order detail ID.",
+      "missing_auth": "Provide either email+password (and optional TOTP) or a cookie header."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Mozillion options",
+        "data": {
+          "scan_interval": "Scan interval (seconds)",
+          "usage_key": "Usage JSON key (dotted)",
+          "remaining_key": "Remaining JSON key (dotted)"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+# Loads default set of integrations. Do not remove.
+default_config:
+
+# Load frontend themes from the themes folder
+frontend:
+  themes: !include_dir_merge_named themes
+
+# Enable debug logging for Mozillion integration
+logger:
+  default: info
+  logs:
+    aiohttp.access: debug
+    homeassistant.components.http: debug
+    homeassistant.config_entries: debug
+    homeassistant.data_entry_flow: debug
+    custom_components.mozillion: debug
+
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
