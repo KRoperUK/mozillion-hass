@@ -1,7 +1,7 @@
 # Mozillion Home Assistant Custom Component
 
 <p align="center">
-  <img src="https://api.dicebear.com/7.x/initials/svg?seed=M&backgroundColor=1e88e5&textColor=ffffff" alt="Mozillion Logo" width="200"/>
+  <img src="https://www.mozillion.com/frontend/images/Logo.svg" alt="Mozillion Logo" width="200"/>
 </p>
 
 This repository contains a Home Assistant custom component that fetches Mozillion data usage.
