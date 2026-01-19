@@ -1,0 +1,14 @@
+services:
+  hass:
+    image: ghcr.io/home-assistant/home-assistant:latest
+    container_name: hass-dev
+    restart: unless-stopped
+    environment:
+      TZ: Etc/UTC
+    ports:
+      - "8123:8123"
+    volumes:
+      - ./example-config:/config
+      - ./custom_components:/config/custom_components
+    # Uncomment to match host network if needed (not required for basic UI use)
+    # network_mode: host
