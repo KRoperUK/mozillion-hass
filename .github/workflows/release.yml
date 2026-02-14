@@ -39,8 +39,8 @@ jobs:
                   create-summary: true
                   skip-commit: false
                   skip-release: true
-                  git-user-name: github-actions
-                  git-user-email: github-actions@users.noreply.github.com
+                  git-user-name: "github-actions[bot]"
+                  git-user-email: "41898282+github-actions[bot]@users.noreply.github.com"
                   create-release: false
 
             - name: Show dev tag summary

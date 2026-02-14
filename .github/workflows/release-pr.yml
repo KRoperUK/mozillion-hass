@@ -41,6 +41,8 @@ jobs:
               uses: peter-evans/create-pull-request@v6
               with:
                   token: ${{ github.token }}
+                  committer: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+                  author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
                   commit-message: "chore: release v${{ steps.changelog.outputs.version }}"
                   branch: "release/v${{ steps.changelog.outputs.version }}"
                   title: "chore: release v${{ steps.changelog.outputs.version }}"
