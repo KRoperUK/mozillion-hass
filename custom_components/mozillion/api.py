@@ -9,7 +9,7 @@ from urllib.parse import unquote
 import pyotp
 from aiohttp import ClientError, ClientSession
 
-from .const import BASE_URL, DEFAULT_BASE_URL, STATUS_BASE_URL, DEFAULT_ORIGIN
+from .const import BASE_URL, DEFAULT_BASE_URL, STATUS_BASE_URL, DEFAULT_ORIGIN, USER_AGENT
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -125,11 +125,7 @@ class MozillionClient:
             "Sec-Fetch-Mode": "navigate",
             "Sec-Fetch-Site": "same-origin",
             "Sec-GPC": "1",
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/143.0.0.0 Safari/537.36"
-            ),
+            "User-Agent": USER_AGENT,
             "Cookie": cookie_header,
         }
 
@@ -149,8 +145,7 @@ class MozillionClient:
 
                 # Parse HTML to extract SIM options from <select id="simlist">
                 plans = []
-                import re
-                
+
                 # Find the simlist select block
                 simlist_pattern = r'<select[^>]*id="simlist"[^>]*>(.*?)</select>'
                 simlist_match = re.search(simlist_pattern, html, re.DOTALL | re.IGNORECASE)
@@ -222,11 +217,7 @@ class MozillionClient:
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-origin",
             "Sec-GPC": "1",
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/143.0.0.0 Safari/537.36"
-            ),
+            "User-Agent": USER_AGENT,
             "X-Requested-With": "XMLHttpRequest",
             "Cookie": cookie_header,
         }

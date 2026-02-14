@@ -29,3 +29,9 @@ ATTR_SIM_NUMBER = "sim_number"
 ATTR_TOTAL = "total"
 ATTR_USAGE_PERCENTAGE = "usage_percentage"
 ATTR_UNLIMITED = "unlimited"
+
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/143.0.0.0 Safari/537.36"
+)

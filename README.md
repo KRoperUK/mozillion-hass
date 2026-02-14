@@ -1,7 +1,7 @@
 # Mozillion Home Assistant Custom Component
 
 <p align="center">
-  <img src="https://www.mozillion.com/frontend/images/Logo.svg" alt="Mozillion Logo" width="200"/>
+  <img src="https://brands.home-assistant.io/mozillion/icon.png" alt="Mozillion Logo" width="200"/>
 </p>
 
 This repository contains a Home Assistant custom component that fetches Mozillion data usage.
@@ -13,7 +13,7 @@ This repository contains a Home Assistant custom component that fetches Mozillio
 1. Make sure you have [HACS](https://hacs.xyz/) installed in your Home Assistant instance
 2. Add this repository as a custom repository in HACS:
    - Go to HACS → Integrations → ⋮ (three dots menu) → Custom repositories
-   - Add `https://github.com/kieran-github/mozillion-hass` as repository
+   - Add `https://github.com/KRoperUK/mozillion-hass` as repository
    - Select "Integration" as category
 3. Click "Explore & Download Repositories" and search for "Mozillion"
 4. Click "Download" and restart Home Assistant

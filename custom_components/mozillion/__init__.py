@@ -5,6 +5,8 @@ import logging
 from datetime import timedelta
 from typing import Any
 
+from aiohttp import ClientError
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
@@ -177,7 +179,7 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 cookie_header=self.cookie_header,
                 xsrf_token=self.xsrf_header,
             )
-        except Exception as err:  # noqa: BLE001
+        except (RuntimeError, ClientError) as err:
             _LOGGER.error("Update failed: %s", err)
             raise UpdateFailed(err) from err
 
