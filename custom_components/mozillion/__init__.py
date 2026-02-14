@@ -1,4 +1,5 @@
 """Setup for the Mozillion integration."""
+
 from __future__ import annotations
 
 import logging
@@ -110,14 +111,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "client": client,
     }
 
-    await hass.config_entries.async_forward_entry_setups(entry, [SENSOR_DOMAIN, BINARY_SENSOR_DOMAIN])
+    await hass.config_entries.async_forward_entry_setups(
+        entry, [SENSOR_DOMAIN, BINARY_SENSOR_DOMAIN]
+    )
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
 
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, [SENSOR_DOMAIN, BINARY_SENSOR_DOMAIN])
+    unload_ok = await hass.config_entries.async_unload_platforms(
+        entry, [SENSOR_DOMAIN, BINARY_SENSOR_DOMAIN]
+    )
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
     return unload_ok
@@ -186,19 +191,27 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
         usage = _deep_get(raw, self.usage_key)
         total = _deep_get(raw, self.remaining_key)
         unlimited = _deep_get(raw, "isUnlimited") or False
-        
+
         # Calculate remaining as total - used
         remaining = None
         usage_percentage = None
         if total is not None and usage is not None:
             try:
                 remaining = float(total) - float(usage)
-                usage_percentage = (float(usage) / float(total)) * 100 if float(total) > 0 else 0
+                usage_percentage = (
+                    (float(usage) / float(total)) * 100 if float(total) > 0 else 0
+                )
             except (ValueError, TypeError):
                 remaining = total
-        
-        _LOGGER.debug("Update success: usage=%s, total=%s, remaining=%s, percentage=%s, unlimited=%s", 
-                     usage, total, remaining, usage_percentage, unlimited)
+
+        _LOGGER.debug(
+            "Update success: usage=%s, total=%s, remaining=%s, percentage=%s, unlimited=%s",
+            usage,
+            total,
+            remaining,
+            usage_percentage,
+            unlimited,
+        )
 
         return {
             ATTR_RAW: raw,

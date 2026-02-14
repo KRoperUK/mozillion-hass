@@ -1,4 +1,5 @@
 """Tests for the Mozillion config flow."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -6,11 +7,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
-from custom_components.mozillion.config_flow import MozillionConfigFlow, MozillionOptionsFlowHandler
+from custom_components.mozillion.config_flow import (
+    MozillionConfigFlow,
+    MozillionOptionsFlowHandler,
+)
 from custom_components.mozillion.const import (
     CONF_EMAIL,
     CONF_ORDER_DETAIL_ID,
@@ -28,13 +31,13 @@ from custom_components.mozillion.const import (
     DEFAULT_REMAINING_KEY,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_USAGE_KEY,
-    DOMAIN,
 )
 
 
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
 
 def _user_input_login(**overrides: Any) -> dict[str, Any]:
     """Build a default user input dict for the login path."""
@@ -81,6 +84,7 @@ def _make_flow(hass: MagicMock) -> MozillionConfigFlow:
 # async_step_user – show form
 # ---------------------------------------------------------------------------
 
+
 class TestUserStepForm:
     """Tests for the initial user form display."""
 
@@ -99,6 +103,7 @@ class TestUserStepForm:
 # ---------------------------------------------------------------------------
 # async_step_user – login path
 # ---------------------------------------------------------------------------
+
 
 class TestUserStepLogin:
     """Tests for the login authentication path."""
@@ -120,11 +125,12 @@ class TestUserStepLogin:
             }
         ]
 
-        with patch(
-            "custom_components.mozillion.config_flow.async_get_clientsession"
-        ), patch(
-            "custom_components.mozillion.config_flow.MozillionClient",
-            return_value=mock_client,
+        with (
+            patch("custom_components.mozillion.config_flow.async_get_clientsession"),
+            patch(
+                "custom_components.mozillion.config_flow.MozillionClient",
+                return_value=mock_client,
+            ),
         ):
             result = await flow.async_step_user(_user_input_login())
 
@@ -142,11 +148,12 @@ class TestUserStepLogin:
         mock_client.async_login.return_value = ("cookie=abc", "xsrf-tok")
         mock_client.async_fetch_dashboard_ids.return_value = []
 
-        with patch(
-            "custom_components.mozillion.config_flow.async_get_clientsession"
-        ), patch(
-            "custom_components.mozillion.config_flow.MozillionClient",
-            return_value=mock_client,
+        with (
+            patch("custom_components.mozillion.config_flow.async_get_clientsession"),
+            patch(
+                "custom_components.mozillion.config_flow.MozillionClient",
+                return_value=mock_client,
+            ),
         ):
             result = await flow.async_step_user(_user_input_login())
 
@@ -162,11 +169,12 @@ class TestUserStepLogin:
         mock_client = AsyncMock()
         mock_client.async_login.side_effect = RuntimeError("Bad credentials")
 
-        with patch(
-            "custom_components.mozillion.config_flow.async_get_clientsession"
-        ), patch(
-            "custom_components.mozillion.config_flow.MozillionClient",
-            return_value=mock_client,
+        with (
+            patch("custom_components.mozillion.config_flow.async_get_clientsession"),
+            patch(
+                "custom_components.mozillion.config_flow.MozillionClient",
+                return_value=mock_client,
+            ),
         ):
             result = await flow.async_step_user(_user_input_login())
 
@@ -180,6 +188,7 @@ class TestUserStepLogin:
 # async_step_user – cookie path
 # ---------------------------------------------------------------------------
 
+
 class TestUserStepCookie:
     """Tests for the cookie authentication path."""
 
@@ -192,11 +201,12 @@ class TestUserStepCookie:
         mock_client = AsyncMock()
         mock_client.async_fetch_dashboard_ids.return_value = []
 
-        with patch(
-            "custom_components.mozillion.config_flow.async_get_clientsession"
-        ), patch(
-            "custom_components.mozillion.config_flow.MozillionClient",
-            return_value=mock_client,
+        with (
+            patch("custom_components.mozillion.config_flow.async_get_clientsession"),
+            patch(
+                "custom_components.mozillion.config_flow.MozillionClient",
+                return_value=mock_client,
+            ),
         ):
             result = await flow.async_step_user(_user_input_cookie())
 
@@ -209,14 +219,17 @@ class TestUserStepCookie:
         hass = MagicMock(spec=HomeAssistant)
         flow = _make_flow(hass)
 
-        with patch(
-            "custom_components.mozillion.config_flow.async_get_clientsession"
-        ), patch(
-            "custom_components.mozillion.config_flow.MozillionClient",
-            return_value=AsyncMock(),
+        with (
+            patch("custom_components.mozillion.config_flow.async_get_clientsession"),
+            patch(
+                "custom_components.mozillion.config_flow.MozillionClient",
+                return_value=AsyncMock(),
+            ),
         ):
             result = await flow.async_step_user(
-                _user_input_login(**{CONF_EMAIL: "", CONF_PASSWORD: "", CONF_SESSION_COOKIE: ""})
+                _user_input_login(
+                    **{CONF_EMAIL: "", CONF_PASSWORD: "", CONF_SESSION_COOKIE: ""}
+                )
             )
 
         assert result["type"] == FlowResultType.FORM
@@ -226,6 +239,7 @@ class TestUserStepCookie:
 # ---------------------------------------------------------------------------
 # async_step_manual_ids
 # ---------------------------------------------------------------------------
+
 
 class TestManualIdsStep:
     """Tests for the manual ID entry step."""
@@ -253,7 +267,9 @@ class TestManualIdsStep:
         flow._xsrf_token = "xsrf-tok"
         flow.async_set_unique_id = AsyncMock()
         flow._abort_if_unique_id_configured = MagicMock()
-        flow.async_create_entry = MagicMock(return_value={"type": FlowResultType.CREATE_ENTRY})
+        flow.async_create_entry = MagicMock(
+            return_value={"type": FlowResultType.CREATE_ENTRY}
+        )
 
         with patch(
             "custom_components.mozillion.config_flow._validate_input",
@@ -300,6 +316,7 @@ class TestManualIdsStep:
 # async_step_select_plan
 # ---------------------------------------------------------------------------
 
+
 class TestSelectPlanStep:
     """Tests for the plan selection step."""
 
@@ -339,7 +356,9 @@ class TestSelectPlanStep:
         ]
         flow.async_set_unique_id = AsyncMock()
         flow._abort_if_unique_id_configured = MagicMock()
-        flow.async_create_entry = MagicMock(return_value={"type": FlowResultType.CREATE_ENTRY})
+        flow.async_create_entry = MagicMock(
+            return_value={"type": FlowResultType.CREATE_ENTRY}
+        )
 
         with patch(
             "custom_components.mozillion.config_flow._validate_input",
@@ -357,6 +376,7 @@ class TestSelectPlanStep:
 # Options flow
 # ---------------------------------------------------------------------------
 
+
 class TestOptionsFlow:
     """Tests for the options flow handler."""
 
@@ -368,7 +388,11 @@ class TestOptionsFlow:
         entry.options = {CONF_SCAN_INTERVAL: 3600}
         entry.data = {CONF_USAGE_KEY: "usedData", CONF_REMAINING_KEY: "totalData"}
         # Patch at the class level to bypass HA's deprecation guard
-        with patch.object(type(handler), "config_entry", new_callable=lambda: property(lambda self: entry)):
+        with patch.object(
+            type(handler),
+            "config_entry",
+            new_callable=lambda: property(lambda self: entry),
+        ):
             result = await handler.async_step_init(user_input=None)
         assert result["type"] == FlowResultType.FORM
         assert result["step_id"] == "init"
@@ -382,6 +406,10 @@ class TestOptionsFlow:
         )
 
         result = await handler.async_step_init(
-            {CONF_SCAN_INTERVAL: 7200, CONF_USAGE_KEY: "data.used", CONF_REMAINING_KEY: "data.total"}
+            {
+                CONF_SCAN_INTERVAL: 7200,
+                CONF_USAGE_KEY: "data.used",
+                CONF_REMAINING_KEY: "data.total",
+            }
         )
         assert result["type"] == FlowResultType.CREATE_ENTRY

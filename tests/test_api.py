@@ -1,7 +1,8 @@
 """Tests for the Mozillion API client."""
+
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from aiohttp import ClientError, ClientSession
@@ -16,6 +17,7 @@ from custom_components.mozillion.api import (
 # ---------------------------------------------------------------------------
 # _extract_csrf
 # ---------------------------------------------------------------------------
+
 
 class TestExtractCsrf:
     """Tests for the _extract_csrf helper."""
@@ -45,6 +47,7 @@ class TestExtractCsrf:
 # ---------------------------------------------------------------------------
 # _build_cookie_header
 # ---------------------------------------------------------------------------
+
 
 class TestBuildCookieHeader:
     """Tests for the _build_cookie_header helper."""
@@ -89,6 +92,7 @@ class TestBuildCookieHeader:
 # ---------------------------------------------------------------------------
 # MozillionClient.async_login
 # ---------------------------------------------------------------------------
+
 
 class TestAsyncLogin:
     """Tests for the login flow."""
@@ -190,6 +194,7 @@ class TestAsyncLogin:
 # ---------------------------------------------------------------------------
 # MozillionClient.async_get_usage
 # ---------------------------------------------------------------------------
+
 
 class TestAsyncGetUsage:
     """Tests for the usage data fetch."""

@@ -1,9 +1,9 @@
 """Tests for the Mozillion coordinator (_async_update_data + setup/unload)."""
+
 from __future__ import annotations
 
-from datetime import timedelta
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from aiohttp import ClientError
@@ -20,14 +20,10 @@ from custom_components.mozillion.const import (
     ATTR_USAGE,
     ATTR_USAGE_PERCENTAGE,
     CONF_EMAIL,
-    CONF_ORDER_DETAIL_ID,
     CONF_ORIGIN,
     CONF_PASSWORD,
-    CONF_SIM_NUMBER,
-    CONF_SIM_PLAN_ID,
     CONF_TOTP_SECRET,
     DEFAULT_ORIGIN,
-    DOMAIN,
 )
 
 from tests.conftest import (
@@ -42,6 +38,7 @@ from tests.conftest import (
 # ---------------------------------------------------------------------------
 # _deep_get (comprehensive – extends existing tests)
 # ---------------------------------------------------------------------------
+
 
 class TestDeepGet:
     """Tests for the _deep_get helper."""
@@ -84,6 +81,7 @@ class TestDeepGet:
 # ---------------------------------------------------------------------------
 # MozillionCoordinator._async_update_data
 # ---------------------------------------------------------------------------
+
 
 def _make_coordinator(
     client: AsyncMock,

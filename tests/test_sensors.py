@@ -1,10 +1,10 @@
 """Tests for the Mozillion sensor and binary sensor platforms."""
+
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
-import pytest
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import PERCENTAGE, UnitOfInformation
@@ -19,18 +19,22 @@ from custom_components.mozillion.const import (
     ATTR_RAW,
     ATTR_REMAINING,
     ATTR_TOTAL,
-    ATTR_UNLIMITED,
     ATTR_USAGE,
     ATTR_USAGE_PERCENTAGE,
     DOMAIN,
 )
 
-from tests.conftest import MOCK_COORDINATOR_DATA, MOCK_COORDINATOR_DATA_UNLIMITED, _make_config_entry
+from tests.conftest import (
+    MOCK_COORDINATOR_DATA,
+    MOCK_COORDINATOR_DATA_UNLIMITED,
+    _make_config_entry,
+)
 
 
 # ---------------------------------------------------------------------------
 # Sensor entity descriptions
 # ---------------------------------------------------------------------------
+
 
 class TestSensorDescriptions:
     """Verify the sensor entity description tuples are correct."""
@@ -65,6 +69,7 @@ class TestSensorDescriptions:
 # Sensor value_fn lambdas
 # ---------------------------------------------------------------------------
 
+
 class TestSensorValueFunctions:
     """Test the value_fn callables produce correct values."""
 
@@ -95,6 +100,7 @@ class TestSensorValueFunctions:
 # ---------------------------------------------------------------------------
 # MozillionSensor entity
 # ---------------------------------------------------------------------------
+
 
 class TestMozillionSensorEntity:
     """Tests for the MozillionSensor entity class."""
@@ -160,6 +166,7 @@ class TestMozillionSensorEntity:
 # ---------------------------------------------------------------------------
 # MozillionUnlimitedSensor (binary sensor)
 # ---------------------------------------------------------------------------
+
 
 class TestUnlimitedBinarySensor:
     """Tests for the MozillionUnlimitedSensor entity."""

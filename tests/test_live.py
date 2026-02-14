@@ -11,6 +11,7 @@ Optional:
     MOZILLION_TOTP_SECRET=BASE32SECRET   # if you have 2FA enabled
     MOZILLION_ORIGIN=https://app.mozillion.com  # override if needed
 """
+
 from __future__ import annotations
 
 import os
@@ -54,6 +55,7 @@ pytestmark = [
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest_asyncio.fixture
 async def session():
     """Create and cleanup an aiohttp session with threaded DNS resolver."""
@@ -78,6 +80,7 @@ async def authenticated_client(session: ClientSession):
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestLiveLogin:
     """Test real login against Mozillion."""
@@ -204,5 +207,9 @@ class TestLiveUsage:
             _LOGGER.info(
                 "✓ Plan '%s': %s",
                 plan.get("name", "unknown"),
-                {k: v for k, v in usage.items() if k in ("usedData", "totalData", "isUnlimited")},
+                {
+                    k: v
+                    for k, v in usage.items()
+                    if k in ("usedData", "totalData", "isUnlimited")
+                },
             )

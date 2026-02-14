@@ -1,4 +1,5 @@
 """Client for Mozillion login and data usage endpoints."""
+
 from __future__ import annotations
 
 import logging
@@ -9,7 +10,13 @@ from urllib.parse import unquote
 import pyotp
 from aiohttp import ClientError, ClientSession
 
-from .const import BASE_URL, DEFAULT_BASE_URL, STATUS_BASE_URL, DEFAULT_ORIGIN, USER_AGENT
+from .const import (
+    BASE_URL,
+    DEFAULT_BASE_URL,
+    STATUS_BASE_URL,
+    DEFAULT_ORIGIN,
+    USER_AGENT,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -17,7 +24,9 @@ _LOGGER = logging.getLogger(__name__)
 class MozillionClient:
     """Thin wrapper around Mozillion endpoints."""
 
-    def __init__(self, session: ClientSession, base_url: str = DEFAULT_BASE_URL) -> None:
+    def __init__(
+        self, session: ClientSession, base_url: str = DEFAULT_BASE_URL
+    ) -> None:
         self._session = session
         self._base_url = base_url.rstrip("/")
 
@@ -89,13 +98,19 @@ class MozillionClient:
                 ) as resp:
                     resp.raise_for_status()
                     # Read response to ensure cookies are set
-                    final_html = await resp.text()
-                    _LOGGER.debug("2FA verification complete, status=%s, final_url=%s", resp.status, str(resp.url))
-                    
+                    await resp.text()
+                    _LOGGER.debug(
+                        "2FA verification complete, status=%s, final_url=%s",
+                        resp.status,
+                        str(resp.url),
+                    )
+
                     # Verify we're actually logged in by checking the final URL
                     if "/2fa" in str(resp.url):
-                        raise RuntimeError("2FA verification failed - still on 2FA page")
-                        
+                        raise RuntimeError(
+                            "2FA verification failed - still on 2FA page"
+                        )
+
             except ClientError as err:
                 _LOGGER.error("2FA verification failed: %s", err)
                 raise RuntimeError(f"2FA verification failed: {err}") from err
@@ -105,7 +120,11 @@ class MozillionClient:
             _LOGGER.error("No cookies returned after login")
             raise RuntimeError("No cookies returned after login")
 
-        _LOGGER.debug("Login complete, cookie_header length=%s, xsrf=%s", len(cookie_header), bool(xsrf))
+        _LOGGER.debug(
+            "Login complete, cookie_header length=%s, xsrf=%s",
+            len(cookie_header),
+            bool(xsrf),
+        )
         return cookie_header, xsrf
 
     async def async_fetch_dashboard_ids(
@@ -148,37 +167,67 @@ class MozillionClient:
 
                 # Find the simlist select block
                 simlist_pattern = r'<select[^>]*id="simlist"[^>]*>(.*?)</select>'
-                simlist_match = re.search(simlist_pattern, html, re.DOTALL | re.IGNORECASE)
-                
+                simlist_match = re.search(
+                    simlist_pattern, html, re.DOTALL | re.IGNORECASE
+                )
+
                 if simlist_match:
                     simlist_content = simlist_match.group(1)
-                    _LOGGER.debug("Found simlist select block, length=%d", len(simlist_content))
-                    
+                    _LOGGER.debug(
+                        "Found simlist select block, length=%d", len(simlist_content)
+                    )
+
                     # Extract each option tag
-                    option_pattern = r'<option[^>]*>(.*?)</option>'
-                    option_matches = re.finditer(option_pattern, simlist_content, re.DOTALL | re.IGNORECASE)
-                    
+                    option_pattern = r"<option[^>]*>(.*?)</option>"
+                    option_matches = re.finditer(
+                        option_pattern, simlist_content, re.DOTALL | re.IGNORECASE
+                    )
+
                     for option_match in option_matches:
                         option_tag = option_match.group(0)
-                        
+
                         # Extract attributes from the option tag
-                        value_match = re.search(r'value\s*=\s*["\']([^"\']+)["\']', option_tag, re.IGNORECASE)
-                        sim_number_match = re.search(r'data-sim-number\s*=\s*["\']([^"\']+)["\']', option_tag, re.IGNORECASE)
-                        order_detail_match = re.search(r'data-orderdetail_id\s*=\s*["\']([^"\']+)["\']', option_tag, re.IGNORECASE)
-                        
+                        value_match = re.search(
+                            r'value\s*=\s*["\']([^"\']+)["\']',
+                            option_tag,
+                            re.IGNORECASE,
+                        )
+                        sim_number_match = re.search(
+                            r'data-sim-number\s*=\s*["\']([^"\']+)["\']',
+                            option_tag,
+                            re.IGNORECASE,
+                        )
+                        order_detail_match = re.search(
+                            r'data-orderdetail_id\s*=\s*["\']([^"\']+)["\']',
+                            option_tag,
+                            re.IGNORECASE,
+                        )
+
                         if value_match and order_detail_match:
                             sim_plan_id = value_match.group(1).strip()
                             order_detail_id = order_detail_match.group(1).strip()
-                            sim_number = sim_number_match.group(1).strip() if sim_number_match else ""
-                            
+                            sim_number = (
+                                sim_number_match.group(1).strip()
+                                if sim_number_match
+                                else ""
+                            )
+
                             if sim_plan_id and order_detail_id:
-                                name = sim_number if sim_number else f"SIM Plan {sim_plan_id}"
-                                plans.append({
-                                    "sim_plan_id": str(sim_plan_id),
-                                    "order_detail_id": str(order_detail_id),
-                                    "name": str(name),
-                                    "sim_number": str(sim_number) if sim_number else "",
-                                })
+                                name = (
+                                    sim_number
+                                    if sim_number
+                                    else f"SIM Plan {sim_plan_id}"
+                                )
+                                plans.append(
+                                    {
+                                        "sim_plan_id": str(sim_plan_id),
+                                        "order_detail_id": str(order_detail_id),
+                                        "name": str(name),
+                                        "sim_number": str(sim_number)
+                                        if sim_number
+                                        else "",
+                                    }
+                                )
                                 _LOGGER.debug(
                                     "Found plan: name=%s, sim_id=%s, order_detail_id=%s",
                                     name,
@@ -229,11 +278,15 @@ class MozillionClient:
         trigger_url = f"{self._base_url}"
         try:
             async with self._session.get(
-                trigger_url, params={"order_detail_id": order_detail_id}, headers=headers
+                trigger_url,
+                params={"order_detail_id": order_detail_id},
+                headers=headers,
             ) as resp:
                 resp.raise_for_status()
                 trigger_data = await resp.json()
-                _LOGGER.debug("Trigger success, status=%s, response=%s", resp.status, trigger_data)
+                _LOGGER.debug(
+                    "Trigger success, status=%s, response=%s", resp.status, trigger_data
+                )
         except ClientError as err:
             _LOGGER.error("Error triggering Mozillion update: %s", err)
             raise RuntimeError(f"Error triggering Mozillion update: {err}") from err
@@ -248,7 +301,11 @@ class MozillionClient:
             async with self._session.get(status_url, headers=headers) as resp:
                 resp.raise_for_status()
                 data = await resp.json()
-                _LOGGER.debug("Usage fetch success, status=%s, data keys=%s", resp.status, list(data.keys()) if isinstance(data, dict) else type(data))
+                _LOGGER.debug(
+                    "Usage fetch success, status=%s, data keys=%s",
+                    resp.status,
+                    list(data.keys()) if isinstance(data, dict) else type(data),
+                )
                 return data
         except ClientError as err:
             _LOGGER.error("Error communicating with Mozillion: %s", err)
@@ -261,7 +318,10 @@ class MozillionClient:
 def _extract_csrf(text: str) -> str | None:
     """Extract a CSRF token from HTML."""
 
-    patterns = [r'name="_token"\s+value="([^"]+)"', r'meta name="csrf-token" content="([^"]+)"']
+    patterns = [
+        r'name="_token"\s+value="([^"]+)"',
+        r'meta name="csrf-token" content="([^"]+)"',
+    ]
     for pat in patterns:
         match = re.search(pat, text)
         if match:

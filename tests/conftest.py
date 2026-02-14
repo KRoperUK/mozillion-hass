@@ -1,15 +1,13 @@
 """Shared fixtures for Mozillion integration tests."""
+
 from __future__ import annotations
 
-from datetime import timedelta
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from custom_components.mozillion.const import (
     ATTR_RAW,
@@ -35,7 +33,6 @@ from custom_components.mozillion.const import (
     DEFAULT_REMAINING_KEY,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_USAGE_KEY,
-    DOMAIN,
 )
 
 
