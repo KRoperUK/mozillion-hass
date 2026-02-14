@@ -1,7 +1,7 @@
 {
   "domain": "mozillion",
   "name": "Mozillion Data",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "documentation": "https://github.com/KRoperUK/mozillion-hass",
   "issue_tracker": "https://github.com/KRoperUK/mozillion-hass/issues",
   "config_flow": true,
