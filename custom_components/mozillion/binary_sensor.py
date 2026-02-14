@@ -1,7 +1,7 @@
 """Binary sensor platform for Mozillion data usage."""
+
 from __future__ import annotations
 
-from typing import Any
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -29,7 +29,9 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class MozillionUnlimitedSensor(CoordinatorEntity[MozillionCoordinator], BinarySensorEntity):  # type: ignore[misc]
+class MozillionUnlimitedSensor(
+    CoordinatorEntity[MozillionCoordinator], BinarySensorEntity
+):  # type: ignore[misc]
     """Representation of Mozillion unlimited boolean sensor."""
 
     _attr_has_entity_name = True

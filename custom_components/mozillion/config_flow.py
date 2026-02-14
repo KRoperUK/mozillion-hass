@@ -1,4 +1,5 @@
 """Config flow for Mozillion integration."""
+
 from __future__ import annotations
 
 import logging
@@ -91,11 +92,15 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._xsrf_token: str | None = None
         self._plans: list[dict[str, str]] = []
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> config_entries.ConfigFlowResult:
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            _LOGGER.warning("Mozillion config flow: user step with keys=%s", list(user_input))
+            _LOGGER.warning(
+                "Mozillion config flow: user step with keys=%s", list(user_input)
+            )
 
         if user_input is not None:
             session = async_get_clientsession(self.hass)
@@ -117,7 +122,7 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         totp_secret=totp_secret,
                         origin=origin,
                     )
-                except Exception as err:  # noqa: BLE001
+                except Exception:  # noqa: BLE001
                     _LOGGER.exception("Login failed during user step")
                     errors["base"] = "cannot_connect"
 
@@ -136,7 +141,9 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     _LOGGER.debug("Fetched %d plans from dashboard", len(self._plans))
                 except Exception:  # noqa: BLE001
                     # If fetch fails, continue to manual entry
-                    _LOGGER.exception("Failed to fetch plans; falling back to manual IDs")
+                    _LOGGER.exception(
+                        "Failed to fetch plans; falling back to manual IDs"
+                    )
                     self._plans = []
 
                 if self._plans:
@@ -172,7 +179,9 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     default="",
                     description={"advanced": True},
                 ): selector.TextSelector(
-                    selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT, multiline=True)
+                    selector.TextSelectorConfig(
+                        type=selector.TextSelectorType.TEXT, multiline=True
+                    )
                 ),
                 vol.Optional(
                     CONF_XSRF_TOKEN,
@@ -200,21 +209,34 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     default=DEFAULT_SCAN_INTERVAL,
                     description={"advanced": True},
                 ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(mode=selector.NumberSelectorMode.BOX, min=60)
+                    selector.NumberSelectorConfig(
+                        mode=selector.NumberSelectorMode.BOX, min=60
+                    )
                 ),
             }
         )
 
-        return self.async_show_form(step_id="user", data_schema=data_schema, errors=errors)
+        return self.async_show_form(
+            step_id="user", data_schema=data_schema, errors=errors
+        )
 
-    async def async_step_select_plan(self, user_input: dict[str, Any] | None = None) -> config_entries.ConfigFlowResult:
+    async def async_step_select_plan(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
         """Let user select from available plans."""
 
         if user_input is not None:
             _LOGGER.warning("Mozillion config flow: select_plan input=%s", user_input)
             selected = user_input["plan"]
             # Find the selected plan
-            plan = next((p for p in self._plans if f"{p['name']} (SIM: {p['sim_plan_id']})" == selected), None)
+            plan = next(
+                (
+                    p
+                    for p in self._plans
+                    if f"{p['name']} (SIM: {p['sim_plan_id']})" == selected
+                ),
+                None,
+            )
             if plan:
                 # Merge with stored credentials
                 data = {**self._credentials}
@@ -229,7 +251,9 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 try:
                     await _validate_input(self.hass, data)
                 except Exception:  # noqa: BLE001
-                    _LOGGER.exception("Validation failed after plan selection; redirecting to manual IDs")
+                    _LOGGER.exception(
+                        "Validation failed after plan selection; redirecting to manual IDs"
+                    )
                     return await self.async_step_manual_ids({"error": "cannot_connect"})
 
                 await self.async_set_unique_id(data[CONF_ORDER_DETAIL_ID])
@@ -250,7 +274,9 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(step_id="select_plan", data_schema=data_schema)
 
-    async def async_step_manual_ids(self, user_input: dict[str, Any] | None = None) -> config_entries.ConfigFlowResult:
+    async def async_step_manual_ids(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
         """Manual entry of order and SIM plan IDs."""
 
         errors: dict[str, str] = {}
@@ -258,7 +284,9 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors["base"] = user_input["error"]
 
         if user_input is not None and not errors:
-            _LOGGER.warning("Mozillion config flow: manual_ids keys=%s", list(user_input))
+            _LOGGER.warning(
+                "Mozillion config flow: manual_ids keys=%s", list(user_input)
+            )
             # Merge with stored credentials
             data = {**self._credentials}
             data[CONF_ORDER_DETAIL_ID] = user_input[CONF_ORDER_DETAIL_ID]
@@ -292,9 +320,13 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }
         )
 
-        return self.async_show_form(step_id="manual_ids", data_schema=data_schema, errors=errors)
+        return self.async_show_form(
+            step_id="manual_ids", data_schema=data_schema, errors=errors
+        )
 
-    async def async_step_import(self, user_input: dict[str, Any]) -> config_entries.ConfigFlowResult:
+    async def async_step_import(
+        self, user_input: dict[str, Any]
+    ) -> config_entries.ConfigFlowResult:
         """Handle import from configuration.yaml."""
 
         return await self.async_step_user(user_input)
@@ -307,7 +339,9 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class MozillionOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle Mozillion options."""
 
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> config_entries.ConfigFlowResult:
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -323,7 +357,9 @@ class MozillionOptionsFlowHandler(config_entries.OptionsFlow):
                 ): int,
                 vol.Optional(
                     CONF_USAGE_KEY,
-                    default=self.config_entry.data.get(CONF_USAGE_KEY, DEFAULT_USAGE_KEY),
+                    default=self.config_entry.data.get(
+                        CONF_USAGE_KEY, DEFAULT_USAGE_KEY
+                    ),
                 ): str,
                 vol.Optional(
                     CONF_REMAINING_KEY,
@@ -334,4 +370,6 @@ class MozillionOptionsFlowHandler(config_entries.OptionsFlow):
             }
         )
 
-        return self.async_show_form(step_id="init", data_schema=data_schema, errors=errors)
+        return self.async_show_form(
+            step_id="init", data_schema=data_schema, errors=errors
+        )
