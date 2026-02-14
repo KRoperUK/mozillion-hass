@@ -1,4 +1,11 @@
-## 0.3.0 (2026-02-14)
+## [0.4.0](https://github.com/KRoperUK/mozillion-hass/compare/dev-v0.3.0...dev-v0.4.0) (2026-02-14)
+
+
+### Features
+
+* overhaul ([e995113](https://github.com/KRoperUK/mozillion-hass/commit/e995113cffa7b8e27ec0997786db6a9420789fa3))
+
+## [0.3.0](https://github.com/KRoperUK/mozillion-hass/compare/4e4cac344e04c3a9ce12b218263f3cb9e5de1528...dev-v0.3.0) (2026-02-14)
 
 
 ### Features
