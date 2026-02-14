@@ -49,6 +49,7 @@ class MozillionUnlimitedSensor(CoordinatorEntity[MozillionCoordinator], BinarySe
             identifiers={(DOMAIN, sim_number or entry.entry_id)},
             name=f"Mozillion {sim_number}" if sim_number else "Mozillion",
             manufacturer="Mozillion",
+            suggested_area="Network",
         )
         # Initialize the state
         self._attr_is_on = False
