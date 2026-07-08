@@ -1,3 +1,10 @@
+## [0.5.1](https://github.com/KRoperUK/mozillion-hass/compare/dev-v0.5.0...dev-v0.5.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* **hacs:** add country GB to hacs.json and resolve dependency clashes ([#7](https://github.com/KRoperUK/mozillion-hass/issues/7)) ([fced025](https://github.com/KRoperUK/mozillion-hass/commit/fced025d27a9a2a7694bdaf1809adfd38b052e8c))
+
 ## [0.5.0](https://github.com/KRoperUK/mozillion-hass/compare/dev-v0.3.0...dev-v0.5.0) (2026-02-14)
 
 
