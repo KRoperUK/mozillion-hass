@@ -153,5 +153,5 @@ voluptuous-openapi==0.2.0
 voluptuous-serialize==2.7.0
 webrtc-models==0.3.0
 yarl==1.22.0
-zeroconf==0.149.12
+zeroconf==0.149.16
 zipp==3.23.0
