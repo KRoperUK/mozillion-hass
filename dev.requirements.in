@@ -1,0 +1,23 @@
+# Direct dependencies for Mozillion Home Assistant integration development and testing
+
+# Production dependencies
+pyotp==2.9.0
+
+# Testing and development tools
+homeassistant==2026.6.0
+pytest
+pytest-homeassistant-custom-component
+pytest-asyncio
+pytest-aiohttp
+pytest-cov
+pytest-timeout
+pytest-unordered
+pytest-freezer
+pytest-picked
+pytest-socket
+pytest-sugar
+syrupy
+requests-mock
+respx
+python-dotenv
+ruff
