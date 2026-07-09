@@ -24,4 +24,4 @@ requests-mock==1.12.1
 respx==0.23.1
 python-dotenv
 ruff==0.14.13
-mypy==2.2.0
+mypy==2.1.0

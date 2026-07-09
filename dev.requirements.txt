@@ -10,9 +10,12 @@ aiogithubapi==26.0.0
     # via homeassistant
 aiohappyeyeballs==2.6.1
     # via aiohttp
+aiohasupervisor==0.4.3
+    # via pytest-homeassistant-custom-component
 aiohttp==3.13.5
     # via
     #   aiogithubapi
+    #   aiohasupervisor
     #   aiohttp-asyncmdnsresolver
     #   aiohttp-cors
     #   aiohttp-fast-zlib
@@ -32,16 +35,18 @@ aiosignal==1.4.0
     # via aiohttp
 aiozoneinfo==0.2.3
     # via homeassistant
+annotated-types==0.7.0
+    # via pydantic
 annotatedyaml==1.0.2
     # via homeassistant
 anyio==4.12.1
     # via httpx
-ast-serialize==0.6.0
-    # via mypy
+ast-serialize==0.3.0
+    # via
+    #   mypy
+    #   pytest-homeassistant-custom-component
 astral==2.2
     # via homeassistant
-astroid==4.0.4
-    # via pylint
 async-interrupt==1.2.2
     # via
     #   habluetooth
@@ -55,7 +60,6 @@ attrs==26.1.0
     #   aiohttp
     #   hass-nabucasa
     #   homeassistant
-    #   pytest
 audioop-lts==0.2.2
     # via
     #   homeassistant
@@ -81,6 +85,8 @@ bluetooth-auto-recovery==1.5.3
     # via habluetooth
 bluetooth-data-tools==1.28.4
     # via habluetooth
+boolean-py==5.0
+    # via license-expression
 boto3==1.42.30
     # via pycognito
 botocore==1.42.30
@@ -108,9 +114,7 @@ ciso8601==2.3.3
     # via
     #   hass-nabucasa
     #   homeassistant
-colored==1.4.4
-    # via syrupy
-coverage==5.5
+coverage==7.14.0
     # via
     #   pytest-cov
     #   pytest-homeassistant-custom-component
@@ -127,8 +131,6 @@ cryptography==48.0.0
     #   pyopenssl
     #   securetar
     #   snitun
-dill==0.4.1
-    # via pylint
 envs==1.4
     # via pycognito
 execnet==2.1.2
@@ -138,7 +140,9 @@ fnv-hash-fast==2.0.3
 fnvhash==0.2.1
     # via fnv-hash-fast
 freezegun==1.5.5
-    # via pytest-freezer
+    # via
+    #   pytest-freezer
+    #   pytest-homeassistant-custom-component
 frozenlist==1.8.0
     # via
     #   aiohttp
@@ -175,12 +179,8 @@ ifaddr==0.2.0
     # via
     #   homeassistant
     #   zeroconf
-importlib-metadata==9.0.0
-    # via jsonpickle
 iniconfig==2.3.0
     # via pytest
-isort==8.0.1
-    # via pylint
 jinja2==3.1.6
     # via homeassistant
 jmespath==1.0.1
@@ -191,49 +191,55 @@ josepy==2.2.0
     # via
     #   acme
     #   hass-nabucasa
-jsonpickle==1.4.1
-    # via pytest-homeassistant-custom-component
 librt==0.13.0
     # via mypy
+license-expression==30.4.3
+    # via pytest-homeassistant-custom-component
 lru-dict==1.4.1
     # via homeassistant
 markupsafe==3.0.3
     # via jinja2
 mashumaro==3.17
-    # via webrtc-models
-mccabe==0.7.0
-    # via pylint
+    # via
+    #   aiohasupervisor
+    #   webrtc-models
 mock-open==1.4.0
     # via pytest-homeassistant-custom-component
 multidict==6.7.0
     # via
     #   aiohttp
     #   yarl
-mypy==2.2.0
+mypy==2.1.0
     # via -r dev.requirements.in
 mypy-extensions==1.1.0
     # via mypy
+numpy==2.3.2
+    # via pytest-homeassistant-custom-component
 orjson==3.11.9
     # via
+    #   aiohasupervisor
     #   homeassistant
     #   webrtc-models
 packaging==25.0
     # via
     #   homeassistant
+    #   pipdeptree
     #   pytest
     #   pytest-sugar
+paho-mqtt==2.1.0
+    # via pytest-homeassistant-custom-component
 pathspec==1.1.1
     # via mypy
 pillow==12.2.0
     # via homeassistant
 pip==26.1.2
     # via pipdeptree
-pipdeptree==1.0.0
+pipdeptree==2.26.1
     # via pytest-homeassistant-custom-component
-platformdirs==4.10.0
-    # via pylint
-pluggy==0.13.1
-    # via pytest
+pluggy==1.6.0
+    # via
+    #   pytest
+    #   pytest-cov
 propcache==0.5.2
     # via
     #   aiohttp
@@ -244,25 +250,23 @@ psutil==7.2.1
     # via psutil-home-assistant
 psutil-home-assistant==0.0.1
     # via homeassistant
-py==1.11.0
-    # via
-    #   pytest
-    #   pytest-forked
 pycares==5.0.1
     # via aiodns
 pycognito==2024.5.1
     # via hass-nabucasa
 pycparser==2.23
     # via cffi
+pydantic==2.13.4
+    # via pytest-homeassistant-custom-component
+pydantic-core==2.46.4
+    # via pydantic
+pygments==2.20.0
+    # via pytest
 pyjwt==2.12.1
     # via
     #   hass-nabucasa
     #   homeassistant
     #   pycognito
-pylint==4.0.6
-    # via pylint-strict-informational
-pylint-strict-informational==0.1
-    # via pytest-homeassistant-custom-component
 pynacl==1.6.2
     # via securetar
 pyobjc-core==12.2.1
@@ -289,56 +293,62 @@ pyrfc3339==2.1.0
     # via acme
 pyric==0.1.6.3
     # via bluetooth-auto-recovery
-pytest==6.2.2
+pytest==9.0.3
     # via
     #   -r dev.requirements.in
     #   pytest-aiohttp
     #   pytest-asyncio
     #   pytest-cov
-    #   pytest-forked
     #   pytest-freezer
+    #   pytest-github-actions-annotate-failures
     #   pytest-homeassistant-custom-component
     #   pytest-picked
     #   pytest-socket
     #   pytest-sugar
-    #   pytest-test-groups
     #   pytest-timeout
     #   pytest-unordered
     #   pytest-xdist
     #   syrupy
-pytest-aiohttp==0.3.0
+pytest-aiohttp==1.1.0
     # via
     #   -r dev.requirements.in
     #   pytest-homeassistant-custom-component
-pytest-asyncio==0.20.3
-    # via -r dev.requirements.in
-pytest-cov==2.10.1
+pytest-asyncio==1.3.0
+    # via
+    #   -r dev.requirements.in
+    #   pytest-aiohttp
+    #   pytest-homeassistant-custom-component
+pytest-cov==7.1.0
     # via
     #   -r dev.requirements.in
     #   pytest-homeassistant-custom-component
-pytest-forked==1.6.0
-    # via pytest-xdist
 pytest-freezer==0.4.9
-    # via -r dev.requirements.in
-pytest-homeassistant-custom-component==0.2.1
+    # via
+    #   -r dev.requirements.in
+    #   pytest-homeassistant-custom-component
+pytest-github-actions-annotate-failures==0.4.0
+    # via pytest-homeassistant-custom-component
+pytest-homeassistant-custom-component==0.13.336
     # via -r dev.requirements.in
 pytest-picked==0.5.1
-    # via -r dev.requirements.in
-pytest-socket==0.6.0
-    # via -r dev.requirements.in
-pytest-sugar==0.9.4
     # via
     #   -r dev.requirements.in
     #   pytest-homeassistant-custom-component
-pytest-test-groups==1.0.3
-    # via pytest-homeassistant-custom-component
-pytest-timeout==1.4.2
+pytest-socket==0.7.0
     # via
     #   -r dev.requirements.in
     #   pytest-homeassistant-custom-component
-pytest-unordered==0.5.2
+pytest-sugar==1.0.0
     # via -r dev.requirements.in
-pytest-xdist==2.1.0
+pytest-timeout==2.4.0
+    # via
+    #   -r dev.requirements.in
+    #   pytest-homeassistant-custom-component
+pytest-unordered==0.7.0
+    # via
+    #   -r dev.requirements.in
+    #   pytest-homeassistant-custom-component
+pytest-xdist==3.8.0
     # via pytest-homeassistant-custom-component
 python-dateutil==2.9.0.post0
     # via
@@ -362,15 +372,13 @@ requests==2.34.2
     #   hass-nabucasa
     #   homeassistant
     #   pycognito
+    #   pytest-homeassistant-custom-component
     #   requests-mock
-    #   responses
-requests-mock==1.8.0
+requests-mock==1.12.1
     # via
     #   -r dev.requirements.in
     #   pytest-homeassistant-custom-component
-responses==0.12.0
-    # via pytest-homeassistant-custom-component
-respx==0.16.2
+respx==0.23.1
     # via
     #   -r dev.requirements.in
     #   pytest-homeassistant-custom-component
@@ -383,10 +391,7 @@ securetar==2026.4.1
 sentence-stream==1.3.0
     # via hass-nabucasa
 six==1.17.0
-    # via
-    #   python-dateutil
-    #   requests-mock
-    #   responses
+    # via python-dateutil
 snitun==0.45.1
     # via hass-nabucasa
 sqlalchemy==2.0.49
@@ -399,19 +404,15 @@ standard-chunk==3.13.0
     # via standard-aifc
 standard-telnetlib==3.13.0
     # via homeassistant
-stdlib-list==0.7.0
-    # via pytest-homeassistant-custom-component
-syrupy==3.0.6
-    # via -r dev.requirements.in
+syrupy==5.2.0
+    # via
+    #   -r dev.requirements.in
+    #   pytest-homeassistant-custom-component
 termcolor==3.3.0
     # via pytest-sugar
 text-unidecode==1.3
     # via python-slugify
-toml==0.10.2
-    # via pytest
-tomlkit==0.15.0
-    # via pylint
-tqdm==4.49.0
+tqdm==4.67.1
     # via pytest-homeassistant-custom-component
 typing-extensions==4.15.0
     # via
@@ -419,19 +420,25 @@ typing-extensions==4.15.0
     #   homeassistant
     #   mashumaro
     #   mypy
+    #   pydantic
+    #   pydantic-core
     #   sqlalchemy
+    #   typing-inspection
+typing-inspection==0.4.2
+    # via pydantic
 tzdata==2025.3
     # via aiozoneinfo
 uart-devices==0.1.1
     # via bluetooth-adapters
 ulid-transform==2.2.9
     # via homeassistant
+unidiff==0.7.5
+    # via pytest-homeassistant-custom-component
 urllib3==2.7.0
     # via
     #   botocore
     #   homeassistant
     #   requests
-    #   responses
 usb-devices==0.4.5
     # via
     #   bluetooth-adapters
@@ -462,5 +469,3 @@ zeroconf==0.149.16
     # via
     #   aiohttp-asyncmdnsresolver
     #   homeassistant
-zipp==4.1.0
-    # via importlib-metadata
