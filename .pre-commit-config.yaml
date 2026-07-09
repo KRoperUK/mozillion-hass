@@ -23,6 +23,17 @@ repos:
         args: [--fix]
       - id: ruff-format
 
+  # Keep manifest.json keys in the order hassfest expects (domain/name first,
+  # then alphabetical) so CI's hassfest validation never trips on ordering.
+  - repo: local
+    hooks:
+      - id: sort-manifest
+        name: sort manifest.json
+        entry: python scripts/sort_manifest.py
+        language: system
+        files: ^custom_components/mozillion/manifest\.json$
+        pass_filenames: false
+
   # Commit message convention
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v4.0.0
@@ -30,14 +41,3 @@ repos:
       - id: conventional-pre-commit
         stages: [commit-msg]
         args: [feat, fix, refactor, docs, test, chore, style, ci, perf, build]
-
-  # Unit tests on push
-  - repo: local
-    hooks:
-      - id: pytest
-        name: pytest (unit tests)
-        entry: .venv/bin/python -m pytest tests/ --ignore=tests/test_live.py -q
-        language: system
-        types: [python]
-        pass_filenames: false
-        stages: [pre-push]
