@@ -46,8 +46,7 @@ jobs:
               - 'custom_components/**'
               - 'tests/**'
               - 'pyproject.toml'
-              - 'dev.requirements.txt'
-              - 'dev.requirements.in'
+              - 'uv.lock'
               - 'hacs.json'
               - '.github/workflows/ci.yml'
 
@@ -69,7 +68,7 @@ jobs:
         run: uv venv --python 3.14 .venv
 
       - name: Install ruff
-        # Pin to the same ruff as the test env (dev.requirements.in) so lint
+        # Pin to the same ruff as pyproject.toml so lint
         # and format can't drift between the two jobs.
         run: uv pip install --python .venv "ruff==0.14.13"
 
@@ -99,11 +98,7 @@ jobs:
         run: uv venv --python 3.14 .venv
 
       - name: Install dependencies
-        # Install from the *input* file (not the macOS-compiled lockfile) so
-        # uv resolves platform-appropriate transitive deps for Linux and skips
-        # the macOS-only pyobjc packages that bleak pulls in. The lockfile is
-        # still used locally for reproducible macOS dev.
-        run: uv pip install --python .venv -r dev.requirements.in
+        run: uv sync --dev
 
       - name: Type check with mypy
         # Convert mypy output into GitHub annotations (inline on the PR diff)

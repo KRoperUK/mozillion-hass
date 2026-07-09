@@ -8,7 +8,7 @@ from typing import Any
 from urllib.parse import unquote
 
 import pyotp
-from aiohttp import ClientError, ClientSession
+from aiohttp import ClientError, ClientResponse, ClientSession
 
 from .const import (
     BASE_URL,
@@ -19,6 +19,10 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class MozillionAuthError(RuntimeError):
+    """Raised when the session is no longer authenticated (cookie/token expired)."""
 
 
 class MozillionClient:
@@ -289,6 +293,7 @@ class MozillionClient:
                 params={"order_detail_id": order_detail_id},
                 headers=headers,
             ) as resp:
+                await _require_authenticated(resp)
                 resp.raise_for_status()
                 trigger_data = await resp.json()
                 _LOGGER.debug(
@@ -306,6 +311,7 @@ class MozillionClient:
         _LOGGER.debug("Fetching usage status from %s", status_url)
         try:
             async with self._session.get(status_url, headers=headers) as resp:
+                await _require_authenticated(resp)
                 resp.raise_for_status()
                 data = await resp.json()
                 _LOGGER.debug(
@@ -348,3 +354,25 @@ def _build_cookie_header(session: ClientSession) -> tuple[str, str | None]:
             xsrf = unquote(cookie.value)
     cookie_header = "; ".join(cookies)
     return cookie_header, xsrf
+
+
+async def _require_authenticated(resp: ClientResponse) -> None:
+    """Raise MozillionAuthError if the response indicates an expired session.
+
+    Mozillion does not return a tidy 401 for an expired session; instead the
+    request is bounced to the HTML login page (HTTP 200, ``text/html``). We
+    detect both the explicit auth status codes and the "got HTML instead of
+    JSON" case so the coordinator can transparently re-authenticate.
+    """
+
+    if isinstance(resp.status, int) and resp.status in (401, 403):
+        raise MozillionAuthError(
+            f"Mozillion rejected the request (HTTP {resp.status}); "
+            "the session has likely expired"
+        )
+    content_type = str(resp.headers.get("Content-Type", ""))
+    if "text/html" in content_type and "application/json" not in content_type:
+        raise MozillionAuthError(
+            "Mozillion returned an HTML login page instead of JSON; "
+            "the session has likely expired"
+        )

@@ -22,6 +22,11 @@ DEFAULT_REMAINING_KEY = "totalData"
 DEFAULT_SCAN_INTERVAL = 86400
 DEFAULT_ORIGIN = "https://www.mozillion.com"
 
+# Proactively re-authenticate once a session is older than this, so we never
+# poll with an already-expired cookie/token (the default 24h scan interval is
+# far longer than Mozillion session lifetimes).
+AUTH_REFRESH_THRESHOLD = 43200  # 12 hours, in seconds
+
 ATTR_RAW = "raw"
 ATTR_USAGE = "usage"
 ATTR_REMAINING = "remaining"

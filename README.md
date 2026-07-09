@@ -39,9 +39,8 @@ This repository contains a Home Assistant custom component that fetches Mozillio
 ## Development
 1. Create a virtual env and install dev deps:
    ```bash
-   python3 -m venv .venv
+   uv sync --dev
    source .venv/bin/activate
-   pip install -r dev.requirements.txt
    ```
 2. For a quick HA dev instance, use Docker Compose:
    ```bash
