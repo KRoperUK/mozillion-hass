@@ -7,10 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from aiohttp import ClientError
-
-from homeassistant.helpers.update_coordinator import UpdateFailed
-
-from custom_components.mozillion import _deep_get, MozillionCoordinator
+from custom_components.mozillion import MozillionCoordinator, _deep_get
 from custom_components.mozillion.const import (
     ATTR_RAW,
     ATTR_REMAINING,
@@ -25,6 +22,7 @@ from custom_components.mozillion.const import (
     CONF_TOTP_SECRET,
     DEFAULT_ORIGIN,
 )
+from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from tests.conftest import (
     MOCK_API_RESPONSE,
@@ -33,7 +31,6 @@ from tests.conftest import (
     MOCK_ENTRY_DATA_LOGIN,
     _make_config_entry,
 )
-
 
 # ---------------------------------------------------------------------------
 # _deep_get (comprehensive – extends existing tests)

@@ -5,15 +5,6 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
-
-from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
-from homeassistant.const import PERCENTAGE, UnitOfInformation
-
-from custom_components.mozillion.sensor import (
-    DATA_SENSORS,
-    MozillionSensor,
-    MozillionSensorEntityDescription,
-)
 from custom_components.mozillion.binary_sensor import MozillionUnlimitedSensor
 from custom_components.mozillion.const import (
     ATTR_RAW,
@@ -23,13 +14,19 @@ from custom_components.mozillion.const import (
     ATTR_USAGE_PERCENTAGE,
     DOMAIN,
 )
+from custom_components.mozillion.sensor import (
+    DATA_SENSORS,
+    MozillionSensor,
+    MozillionSensorEntityDescription,
+)
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+from homeassistant.const import PERCENTAGE, UnitOfInformation
 
 from tests.conftest import (
     MOCK_COORDINATOR_DATA,
     MOCK_COORDINATOR_DATA_UNLIMITED,
     _make_config_entry,
 )
-
 
 # ---------------------------------------------------------------------------
 # Sensor entity descriptions

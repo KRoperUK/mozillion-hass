@@ -6,12 +6,11 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers import selector
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import MozillionClient
 from .const import (
@@ -27,13 +26,12 @@ from .const import (
     CONF_TOTP_SECRET,
     CONF_USAGE_KEY,
     CONF_XSRF_TOKEN,
-    DEFAULT_REMAINING_KEY,
     DEFAULT_ORIGIN,
+    DEFAULT_REMAINING_KEY,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_USAGE_KEY,
     DOMAIN,
 )
-
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -80,7 +78,7 @@ async def _validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str
     return data
 
 
-class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     """Handle a config flow for Mozillion."""
 
     VERSION = 1
@@ -122,7 +120,7 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         totp_secret=totp_secret,
                         origin=origin,
                     )
-                except Exception:  # noqa: BLE001
+                except Exception:
                     _LOGGER.exception("Login failed during user step")
                     errors["base"] = "cannot_connect"
 
@@ -139,7 +137,7 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         xsrf_token=xsrf_token,
                     )
                     _LOGGER.debug("Fetched %d plans from dashboard", len(self._plans))
-                except Exception:  # noqa: BLE001
+                except Exception:
                     # If fetch fails, continue to manual entry
                     _LOGGER.exception(
                         "Failed to fetch plans; falling back to manual IDs"
@@ -250,9 +248,10 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # Validate the selection
                 try:
                     await _validate_input(self.hass, data)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     _LOGGER.exception(
-                        "Validation failed after plan selection; redirecting to manual IDs"
+                        "Validation failed after plan selection; "
+                        "redirecting to manual IDs"
                     )
                     return await self.async_step_manual_ids({"error": "cannot_connect"})
 
@@ -302,7 +301,7 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except ValueError as err:
                 _LOGGER.debug("Validation error in manual IDs: %s", err)
                 errors["base"] = str(err)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 _LOGGER.exception("Unexpected error validating manual IDs")
                 errors["base"] = "cannot_connect"
             else:

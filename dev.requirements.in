@@ -4,6 +4,9 @@
 pyotp==2.9.0
 
 # Testing and development tools
+# pytest 9 requires asyncio_mode = "auto" (see pyproject.toml) because
+# pytest-homeassistant-custom-component ships an autouse async fixture that
+# strict mode no longer claims under pytest 9.
 homeassistant==2026.6.0
 pytest
 pytest-homeassistant-custom-component
@@ -20,4 +23,5 @@ syrupy
 requests-mock
 respx
 python-dotenv
-ruff
+ruff==0.14.13
+mypy==2.2.0
