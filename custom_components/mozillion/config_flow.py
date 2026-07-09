@@ -96,11 +96,9 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ig
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            _LOGGER.warning(
+            _LOGGER.debug(
                 "Mozillion config flow: user step with keys=%s", list(user_input)
             )
-
-        if user_input is not None:
             session = async_get_clientsession(self.hass)
             client = MozillionClient(session)
 
@@ -120,7 +118,7 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ig
                         totp_secret=totp_secret,
                         origin=origin,
                     )
-                except Exception:
+                except RuntimeError:
                     _LOGGER.exception("Login failed during user step")
                     errors["base"] = "cannot_connect"
 
@@ -137,8 +135,7 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ig
                         xsrf_token=xsrf_token,
                     )
                     _LOGGER.debug("Fetched %d plans from dashboard", len(self._plans))
-                except Exception:
-                    # If fetch fails, continue to manual entry
+                except RuntimeError:
                     _LOGGER.exception(
                         "Failed to fetch plans; falling back to manual IDs"
                     )
@@ -224,7 +221,7 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ig
         """Let user select from available plans."""
 
         if user_input is not None:
-            _LOGGER.warning("Mozillion config flow: select_plan input=%s", user_input)
+            _LOGGER.debug("Mozillion config flow: select_plan input=%s", user_input)
             selected = user_input["plan"]
             # Find the selected plan
             plan = next(
@@ -248,7 +245,7 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ig
                 # Validate the selection
                 try:
                     await _validate_input(self.hass, data)
-                except Exception:
+                except (RuntimeError, ValueError):
                     _LOGGER.exception(
                         "Validation failed after plan selection; "
                         "redirecting to manual IDs"
@@ -283,9 +280,7 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ig
             errors["base"] = user_input["error"]
 
         if user_input is not None and not errors:
-            _LOGGER.warning(
-                "Mozillion config flow: manual_ids keys=%s", list(user_input)
-            )
+            _LOGGER.debug("Mozillion config flow: manual_ids keys=%s", list(user_input))
             # Merge with stored credentials
             data = {**self._credentials}
             data[CONF_ORDER_DETAIL_ID] = user_input[CONF_ORDER_DETAIL_ID]
@@ -301,7 +296,7 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ig
             except ValueError as err:
                 _LOGGER.debug("Validation error in manual IDs: %s", err)
                 errors["base"] = str(err)
-            except Exception:
+            except RuntimeError:
                 _LOGGER.exception("Unexpected error validating manual IDs")
                 errors["base"] = "cannot_connect"
             else:
@@ -321,6 +316,100 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ig
 
         return self.async_show_form(
             step_id="manual_ids", data_schema=data_schema, errors=errors
+        )
+
+    async def async_step_reauth(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Handle re-authentication when the session expires without credentials."""
+
+        errors: dict[str, str] = {}
+        existing = self._get_reauth_entry()
+
+        if user_input is not None:
+            session = async_get_clientsession(self.hass)
+            client = MozillionClient(session)
+
+            email = user_input.get(CONF_EMAIL)
+            password = user_input.get(CONF_PASSWORD)
+            totp_secret = user_input.get(CONF_TOTP_SECRET) or None
+            origin = user_input.get(CONF_ORIGIN, DEFAULT_ORIGIN)
+            cookie_header = user_input.get(CONF_SESSION_COOKIE)
+            xsrf_token = user_input.get(CONF_XSRF_TOKEN)
+
+            if email and password:
+                try:
+                    cookie_header, xsrf_token = await client.async_login(
+                        email=email,
+                        password=password,
+                        totp_secret=totp_secret,
+                        origin=origin,
+                    )
+                except RuntimeError:
+                    _LOGGER.exception("Reauth login failed")
+                    errors["base"] = "cannot_connect"
+
+            if not errors and cookie_header:
+                new_data = {
+                    **existing.data,
+                    CONF_EMAIL: email or existing.data.get(CONF_EMAIL, ""),
+                    CONF_PASSWORD: password or existing.data.get(CONF_PASSWORD, ""),
+                    CONF_TOTP_SECRET: (
+                        totp_secret or existing.data.get(CONF_TOTP_SECRET, "")
+                    ),
+                    CONF_ORIGIN: (
+                        origin or existing.data.get(CONF_ORIGIN, DEFAULT_ORIGIN)
+                    ),
+                    CONF_SESSION_COOKIE: cookie_header,
+                    CONF_XSRF_TOKEN: xsrf_token or "",
+                }
+
+                try:
+                    await _validate_input(self.hass, new_data)
+                except (RuntimeError, ValueError):
+                    _LOGGER.exception("Reauth validation failed")
+                    errors["base"] = "cannot_connect"
+                else:
+                    return self.async_update_reload_and_abort(
+                        existing,
+                        data=new_data,
+                        reason="reauth_successful",
+                    )
+            elif not cookie_header:
+                errors["base"] = "missing_auth"
+
+        data_schema = vol.Schema(
+            {
+                vol.Optional(CONF_EMAIL, default=""): selector.TextSelector(
+                    selector.TextSelectorConfig(type=selector.TextSelectorType.EMAIL)
+                ),
+                vol.Optional(CONF_PASSWORD, default=""): selector.TextSelector(
+                    selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+                ),
+                vol.Optional(CONF_TOTP_SECRET, default=""): selector.TextSelector(
+                    selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
+                ),
+                vol.Optional(
+                    CONF_SESSION_COOKIE,
+                    default="",
+                    description={"advanced": True},
+                ): selector.TextSelector(
+                    selector.TextSelectorConfig(
+                        type=selector.TextSelectorType.TEXT, multiline=True
+                    )
+                ),
+                vol.Optional(
+                    CONF_XSRF_TOKEN,
+                    default="",
+                    description={"advanced": True},
+                ): selector.TextSelector(
+                    selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
+                ),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="reauth", data_schema=data_schema, errors=errors
         )
 
     async def async_step_import(
