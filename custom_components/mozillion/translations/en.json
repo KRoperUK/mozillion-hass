@@ -34,12 +34,26 @@
           "sim_plan_id": "SIM plan ID",
           "sim_number": "SIM number (optional)"
         }
+      },
+      "reauth": {
+        "title": "Re-authenticate Mozillion",
+        "description": "Your Mozillion session has expired. Provide new credentials or a fresh cookie header.",
+        "data": {
+          "email": "Email",
+          "password": "Password",
+          "totp_secret": "TOTP secret (Base32, optional)",
+          "session_cookie": "Cookie header (optional if using login)",
+          "xsrf_token": "XSRF token header (optional)"
+        }
       }
     },
     "error": {
       "cannot_connect": "Cannot connect, check cookies or credentials and order detail ID.",
       "missing_auth": "Provide either email+password (and optional TOTP) or a cookie header."
     }
+  },
+  "reauth": {
+    "reauth_successful": "Re-authentication successful."
   },
   "options": {
     "step": {

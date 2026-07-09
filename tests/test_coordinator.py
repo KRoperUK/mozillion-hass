@@ -28,6 +28,7 @@ from custom_components.mozillion.const import (
     CONF_XSRF_TOKEN,
     DEFAULT_ORIGIN,
 )
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from tests.conftest import (
@@ -175,7 +176,7 @@ class TestCoordinatorUpdate:
 
     @pytest.mark.asyncio
     async def test_no_cookies_no_creds_raises(self) -> None:
-        """No cookies and no credentials raises UpdateFailed."""
+        """No cookies and no credentials raises ConfigEntryAuthFailed."""
         client = AsyncMock()
         coordinator = _make_coordinator(
             client,
@@ -187,7 +188,7 @@ class TestCoordinatorUpdate:
         coordinator.email = ""
         coordinator.password = ""
 
-        with pytest.raises(UpdateFailed):
+        with pytest.raises(ConfigEntryAuthFailed):
             await coordinator._async_update_data()
 
     @pytest.mark.asyncio
@@ -357,7 +358,7 @@ class TestCoordinatorUpdate:
 
     @pytest.mark.asyncio
     async def test_auth_error_without_creds_raises_update_failed(self) -> None:
-        """Expired session with no credentials surfaces as UpdateFailed."""
+        """Expired session with no credentials surfaces as ConfigEntryAuthFailed."""
         client = AsyncMock()
         client.async_get_usage.side_effect = MozillionAuthError("session expired")
 
@@ -366,7 +367,7 @@ class TestCoordinatorUpdate:
         coordinator.email = ""
         coordinator.password = ""
 
-        with pytest.raises(UpdateFailed, match="no credentials"):
+        with pytest.raises(ConfigEntryAuthFailed, match="no credentials"):
             await coordinator._async_update_data()
 
     @pytest.mark.asyncio
