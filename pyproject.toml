@@ -39,7 +39,8 @@ norecursedirs = ["tests/test_live.py"]
 addopts = [
     "--strict-markers",
     "--timeout=30",
-    "-p no:cacheprovider",
+    "-p",
+    "no:cacheprovider",
 ]
 filterwarnings = [
     "error",
