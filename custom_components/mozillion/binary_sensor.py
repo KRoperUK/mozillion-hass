@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -10,8 +9,8 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import ATTR_UNLIMITED, CONF_SIM_NUMBER, DOMAIN
 from . import MozillionCoordinator
+from .const import ATTR_UNLIMITED, CONF_SIM_NUMBER, DOMAIN
 
 
 async def async_setup_entry(

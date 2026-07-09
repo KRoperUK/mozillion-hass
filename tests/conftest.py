@@ -6,9 +6,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-from homeassistant.config_entries import ConfigEntry
-
 from custom_components.mozillion.const import (
     ATTR_RAW,
     ATTR_REMAINING,
@@ -34,7 +31,7 @@ from custom_components.mozillion.const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_USAGE_KEY,
 )
-
+from homeassistant.config_entries import ConfigEntry
 
 # ---------------------------------------------------------------------------
 # Sample data returned by the Mozillion API

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, Tuple
+from typing import Any
 from urllib.parse import unquote
 
 import pyotp
@@ -13,8 +13,8 @@ from aiohttp import ClientError, ClientSession
 from .const import (
     BASE_URL,
     DEFAULT_BASE_URL,
-    STATUS_BASE_URL,
     DEFAULT_ORIGIN,
+    STATUS_BASE_URL,
     USER_AGENT,
 )
 
@@ -36,8 +36,11 @@ class MozillionClient:
         password: str,
         totp_secret: str | None = None,
         origin: str = DEFAULT_ORIGIN,
-    ) -> Tuple[str, str | None]:
-        """Perform login (and 2FA if secret provided). Returns (cookie_header, xsrf_header)."""
+    ) -> tuple[str, str | None]:
+        """Perform login (and 2FA if secret provided).
+
+        Returns (cookie_header, xsrf_header).
+        """
 
         _LOGGER.debug("Starting login for email=%s, totp=%s", email, bool(totp_secret))
 
@@ -137,7 +140,10 @@ class MozillionClient:
         _LOGGER.debug("Fetching dashboard to extract IDs")
 
         headers = {
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept": (
+                "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                "image/avif,image/webp,*/*;q=0.8"
+            ),
             "DNT": "1",
             "Priority": "u=1, i",
             "Sec-Fetch-Dest": "document",
@@ -229,7 +235,8 @@ class MozillionClient:
                                     }
                                 )
                                 _LOGGER.debug(
-                                    "Found plan: name=%s, sim_id=%s, order_detail_id=%s",
+                                    "Found plan: name=%s, sim_id=%s, "
+                                    "order_detail_id=%s",
                                     name,
                                     sim_plan_id,
                                     order_detail_id,
@@ -252,7 +259,7 @@ class MozillionClient:
         sim_plan_id: str,
         cookie_header: str,
         xsrf_token: str | None = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Fetch usage data from Mozillion."""
 
         _LOGGER.debug("Triggering usage update for order_detail_id=%s", order_detail_id)
@@ -329,7 +336,7 @@ def _extract_csrf(text: str) -> str | None:
     return None
 
 
-def _build_cookie_header(session: ClientSession) -> Tuple[str, str | None]:
+def _build_cookie_header(session: ClientSession) -> tuple[str, str | None]:
     """Build cookie header and decode XSRF token."""
 
     jar = session.cookie_jar

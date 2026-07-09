@@ -7,14 +7,13 @@ from datetime import timedelta
 from typing import Any
 
 from aiohttp import ClientError
-
+from homeassistant.components.binary_sensor import DOMAIN as BINARY_SENSOR_DOMAIN
+from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
-from homeassistant.components.binary_sensor import DOMAIN as BINARY_SENSOR_DOMAIN
 
 from .api import MozillionClient
 from .const import (
@@ -37,8 +36,8 @@ from .const import (
     CONF_TOTP_SECRET,
     CONF_USAGE_KEY,
     CONF_XSRF_TOKEN,
-    DEFAULT_REMAINING_KEY,
     DEFAULT_ORIGIN,
+    DEFAULT_REMAINING_KEY,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_USAGE_KEY,
     DOMAIN,
@@ -205,7 +204,8 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 remaining = total
 
         _LOGGER.debug(
-            "Update success: usage=%s, total=%s, remaining=%s, percentage=%s, unlimited=%s",
+            "Update success: usage=%s, total=%s, remaining=%s, "
+            "percentage=%s, unlimited=%s",
             usage,
             total,
             remaining,

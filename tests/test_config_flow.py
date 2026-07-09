@@ -6,10 +6,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
-
 from custom_components.mozillion.config_flow import (
     MozillionConfigFlow,
     MozillionOptionsFlowHandler,
@@ -32,7 +28,8 @@ from custom_components.mozillion.const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_USAGE_KEY,
 )
-
+from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
 
 # ---------------------------------------------------------------------------
 # Shared helpers
