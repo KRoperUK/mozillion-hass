@@ -6,12 +6,11 @@ Thanks for your interest in contributing! Here's how to get started.
 
 1. Clone the repo and create a virtual environment:
    ```bash
-   git clone https://github.com/KRoperUK/mozillion-hass.git
-   cd mozillion-hass
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -r dev.requirements.txt
-   ```
+    git clone https://github.com/KRoperUK/mozillion-hass.git
+    cd mozillion-hass
+    uv sync --dev
+    source .venv/bin/activate
+    ```
 
 2. Start a local Home Assistant instance:
    ```bash
