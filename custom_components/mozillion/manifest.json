@@ -7,10 +7,13 @@
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/KRoperUK/mozillion-hass",
+  "integration_type": "hub",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/KRoperUK/mozillion-hass/issues",
+  "loggers": [],
+  "quality_scale": "gold",
   "requirements": [
     "pyotp==2.9.0"
   ],
-  "version": "0.5.2"
+  "version": "0.5.1"
 }
