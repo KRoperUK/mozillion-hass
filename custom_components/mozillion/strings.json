@@ -50,10 +50,10 @@
     "error": {
       "cannot_connect": "Cannot connect, check cookies or credentials and order detail ID.",
       "missing_auth": "Provide either email+password (and optional TOTP) or a cookie header."
+    },
+    "abort": {
+      "reauth_successful": "Re-authentication successful."
     }
-  },
-  "reauth": {
-    "reauth_successful": "Re-authentication successful."
   },
   "options": {
     "step": {
