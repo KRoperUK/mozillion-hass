@@ -5,6 +5,13 @@
 
 * **coordinator:** transparently re-authenticate on expired sessions ([a3eafa2](https://github.com/KRoperUK/mozillion-hass/commit/a3eafa25900f4f5f93a5cfa9bd8b022e419f3798))
 
+## [0.6.1](https://github.com/KRoperUK/mozillion-hass/compare/v0.6.0...v0.6.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* move reauth_successful to config.abort in translations ([f20760f](https://github.com/KRoperUK/mozillion-hass/commit/f20760f74e62238d4bea2980797e7e9509402afc))
+
 ## [0.6.0](https://github.com/KRoperUK/mozillion-hass/compare/v0.5.1...v0.6.0) (2026-07-09)
 
 
