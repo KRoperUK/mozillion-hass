@@ -13,11 +13,11 @@ fetches Mozillion data usage via the Mozillion API. Distributed via HACS.
 | File | Responsibility |
 | --- | --- |
 | `__init__.py` | Entry setup/unload. Creates coordinator, classifies errors into `ConfigEntryNotReady` (transient) vs `ConfigEntryAuthFailed` (reauth). |
-| `api.py` | `MozillionAPI` — handles authentication (cookie-based or email/password+TOTP), session management, and data fetching. |
-| `coordinator.py` | `MozillionCoordinator(DataUpdateCoordinator)` — polls the API, handles expired sessions with transparent re-authentication. |
-| `config_flow.py` | Two-phase config flow: user enters credentials (email/password+TOTP or cookie/XSRF), validates against the API. |
-| `sensor.py` | Builds `MozillionSensor` entities from coordinator data — usage and remaining, plus raw payload attribute. |
-| `binary_sensor.py` | `MozillionBinarySensor` for connectivity status. |
+| `api.py` | `MozillionClient` — handles authentication (cookie-based or email/password+TOTP), session management, and data fetching. |
+| `coordinator.py` | `MozillionCoordinator(DataUpdateCoordinator)` — polls the API, handles expired sessions with transparent re-authentication and reauth. |
+| `config_flow.py` | Multi-step config flow + options: user enters credentials (email/password+TOTP or cookie/XSRF), validates against the API. Supports reauth. |
+| `sensor.py` | Builds `MozillionSensor` entities from coordinator data — usage, total, remaining, and percentage. |
+| `binary_sensor.py` | `MozillionUnlimitedSensor` for unlimited-plan status. |
 | `const.py` | Domain, config keys, defaults. |
 
 ## Commands
@@ -37,7 +37,7 @@ uv run pytest tests/
 
 - **Python 3.14** (Home Assistant >=2026.6 requires >=3.14), ruff (line length 88) for lint + format.
 - **Conventional Commits** for commit and PR titles (`fix:`, `feat:`, `chore:`, `docs:`) — this drives changelog and version bumps.
-- Every behaviour change needs tests. Tests mock `MozillionAPI` — see `tests/conftest.py` fixtures.
+- Every behaviour change needs tests. Tests mock `MozillionClient` — see `tests/conftest.py` fixtures.
 - `strings.json` and `translations/*.json` must stay in sync.
 
 ## Workflow / repo rules
