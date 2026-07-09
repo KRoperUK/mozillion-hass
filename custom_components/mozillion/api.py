@@ -91,7 +91,7 @@ class MozillionClient:
         if totp_secret:
             twofa_url = f"{BASE_URL}/2fa/verify"
             code = pyotp.TOTP(totp_secret).now()
-            _LOGGER.debug("Submitting 2FA code: %s", code)
+            _LOGGER.debug("Submitting 2FA code")
             form_2fa = {"_token": token, "code": code}
             try:
                 async with self._session.post(
