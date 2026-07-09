@@ -5,6 +5,21 @@ description = "Mozillion Home Assistant integration"
 readme = "README.md"
 requires-python = ">=3.14.2"
 dependencies = ["pyotp==2.9.0"]
+authors = [
+    { name = "KRoperUK", url = "https://github.com/KRoperUK" },
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Home Automation",
+]
+urls.Repository = "https://github.com/KRoperUK/mozillion-hass"
+urls.Documentation = "https://github.com/KRoperUK/mozillion-hass"
+urls."Issue Tracker" = "https://github.com/KRoperUK/mozillion-hass/issues"
 
 [dependency-groups]
 dev = [
@@ -58,6 +73,8 @@ source = ["custom_components/mozillion"]
 omit = ["tests/*", "custom_components/mozillion/__pycache__/*"]
 
 [tool.coverage.report]
+show_missing = true
+fail_under = 69
 exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING:",
@@ -92,14 +109,28 @@ ignore = [
 [tool.mypy]
 python_version = "3.14"
 ignore_missing_imports = true
-warn_unused_ignores = false
-warn_redundant_casts = true
-disallow_untyped_defs = false
 check_untyped_defs = true
 show_error_codes = true
-exclude = ["tests/", ".venv/", "build/"]
+files = ["custom_components/mozillion"]
 
 [[tool.mypy.overrides]]
-module = ["homeassistant.*", "pyotp.*"]
+module = "homeassistant.*"
 ignore_missing_imports = true
 follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = "pyotp.*"
+ignore_missing_imports = true
+follow_imports = "skip"
+
+# HA types are unavailable at strict-mode check time (homeassistant is not
+# installed as a runtime dependency — it's only a test dependency). The
+# subclass, return-type, and override errors are all artefacts of HA types
+# being Any, so disable the checks that strict mode enables but can't satisfy.
+# The effective policy is: be strict about our own code, not about HA types.
+[[tool.mypy.overrides]]
+module = "custom_components.*"
+disallow_subclassing_any = false
+allow_untyped_defs = false
+warn_unused_ignores = true
+warn_return_any = true
