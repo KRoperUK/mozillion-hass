@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from aiohttp import ClientError
-from custom_components.mozillion import MozillionCoordinator, _deep_get
+from custom_components.mozillion import (
+    MozillionAuthError,
+    MozillionCoordinator,
+    _deep_get,
+)
 from custom_components.mozillion.const import (
     ATTR_RAW,
     ATTR_REMAINING,
@@ -19,7 +23,9 @@ from custom_components.mozillion.const import (
     CONF_EMAIL,
     CONF_ORIGIN,
     CONF_PASSWORD,
+    CONF_SESSION_COOKIE,
     CONF_TOTP_SECRET,
+    CONF_XSRF_TOKEN,
     DEFAULT_ORIGIN,
 )
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -91,6 +97,8 @@ def _make_coordinator(
     """Create a coordinator with mocked dependencies."""
     hass = MagicMock()
     hass.loop = None  # Prevent real event loop usage
+    hass.config_entries = MagicMock()
+    hass.config_entries.async_update_entry = AsyncMock()
     entry = _make_config_entry(data=entry_data or MOCK_ENTRY_DATA_COOKIE)
 
     coordinator = MozillionCoordinator.__new__(MozillionCoordinator)
@@ -104,6 +112,8 @@ def _make_coordinator(
     coordinator.password = entry.data.get(CONF_PASSWORD)
     coordinator.totp_secret = entry.data.get(CONF_TOTP_SECRET) or None
     coordinator.origin = entry.data.get(CONF_ORIGIN, DEFAULT_ORIGIN)
+    coordinator._auth_time = None
+    coordinator.hass = hass
     return coordinator
 
 
@@ -239,3 +249,139 @@ class TestCoordinatorUpdate:
 
         result = await coordinator._async_update_data()
         assert result[ATTR_SIM_NUMBER] == "07700900000"
+
+    @pytest.mark.asyncio
+    async def test_proactive_refresh_when_session_stale(self) -> None:
+        """Coordinator re-logs in before fetching when the session is stale."""
+        import time
+
+        from custom_components.mozillion.const import AUTH_REFRESH_THRESHOLD
+
+        client = AsyncMock()
+        client.async_login.return_value = ("fresh-cookie", "fresh-xsrf")
+        client.async_get_usage.return_value = MOCK_API_RESPONSE
+
+        # Cookie present but credentials available and no known auth time → force
+        # a proactive refresh.
+        coordinator = _make_coordinator(
+            client,
+            entry_data=MOCK_ENTRY_DATA_LOGIN,
+            cookie="stale-cookie",
+            xsrf="stale-xsrf",
+        )
+        # Far enough in the past (relative to monotonic) to exceed the threshold.
+        coordinator._auth_time = time.monotonic() - (AUTH_REFRESH_THRESHOLD + 100)
+
+        result = await coordinator._async_update_data()
+
+        client.async_login.assert_called_once()
+        assert coordinator.cookie_header == "fresh-cookie"
+        assert coordinator.xsrf_header == "fresh-xsrf"
+        # The fetch must use the freshly refreshed cookie, not the stale one.
+        used_cookie = client.async_get_usage.call_args.kwargs["cookie_header"]
+        assert used_cookie == "fresh-cookie"
+        assert result[ATTR_USAGE] == 3.5
+
+    @pytest.mark.asyncio
+    async def test_relogin_on_auth_error_then_success(self) -> None:
+        """Expired session triggers one re-login and a successful retry."""
+        import time
+
+        client = AsyncMock()
+        client.async_login.return_value = ("new-cookie", "new-xsrf")
+
+        # First usage attempt raises an auth error, retry succeeds.
+        client.async_get_usage.side_effect = [
+            MozillionAuthError("session expired"),
+            MOCK_API_RESPONSE,
+        ]
+
+        coordinator = _make_coordinator(
+            client,
+            entry_data=MOCK_ENTRY_DATA_LOGIN,
+            cookie="old-cookie",
+            xsrf="old-xsrf",
+        )
+        # Mark the session as freshly authenticated so the coordinator only
+        # re-logs in because of the auth error, not proactively.
+        coordinator._auth_time = time.monotonic()
+
+        result = await coordinator._async_update_data()
+
+        client.async_login.assert_called_once()
+        assert coordinator.cookie_header == "new-cookie"
+        assert result[ATTR_USAGE] == 3.5
+        assert client.async_get_usage.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_relogin_on_auth_error_persists_session(self) -> None:
+        """A successful re-login persists the refreshed session to the entry."""
+        import time
+        from unittest.mock import MagicMock
+
+        client = AsyncMock()
+        client.async_login.return_value = ("persisted-cookie", "persisted-xsrf")
+        client.async_get_usage.side_effect = [
+            MozillionAuthError("session expired"),
+            MOCK_API_RESPONSE,
+        ]
+
+        # Coordinators in these tests use a MagicMock entry; give it the real
+        # async_update_entry so we can assert the persisted data.
+        entry = _make_config_entry(data=MOCK_ENTRY_DATA_LOGIN)
+        entry.async_update_entry = MagicMock()
+
+        coordinator = MozillionCoordinator.__new__(MozillionCoordinator)
+        coordinator.client = client
+        coordinator.entry = entry
+        coordinator.usage_key = "usedData"
+        coordinator.remaining_key = "totalData"
+        coordinator.cookie_header = "old-cookie"
+        coordinator.xsrf_header = "old-xsrf"
+        coordinator.email = entry.data.get(CONF_EMAIL)
+        coordinator.password = entry.data.get(CONF_PASSWORD)
+        coordinator.totp_secret = entry.data.get(CONF_TOTP_SECRET) or None
+        coordinator.origin = entry.data.get(CONF_ORIGIN, DEFAULT_ORIGIN)
+        # Fresh session → only the auth-error path triggers a re-login.
+        coordinator._auth_time = time.monotonic()
+        coordinator.hass = MagicMock()
+        coordinator.hass.config_entries = MagicMock()
+        coordinator.hass.config_entries.async_update_entry = entry.async_update_entry
+
+        await coordinator._async_update_data()
+
+        entry.async_update_entry.assert_called_once()
+        persisted = entry.async_update_entry.call_args.kwargs["data"]
+        assert persisted[CONF_SESSION_COOKIE] == "persisted-cookie"
+        assert persisted[CONF_XSRF_TOKEN] == "persisted-xsrf"
+
+    @pytest.mark.asyncio
+    async def test_auth_error_without_creds_raises_update_failed(self) -> None:
+        """Expired session with no credentials surfaces as UpdateFailed."""
+        client = AsyncMock()
+        client.async_get_usage.side_effect = MozillionAuthError("session expired")
+
+        # Cookie-only entry (no email/password) cannot re-authenticate.
+        coordinator = _make_coordinator(client, cookie="old-cookie", xsrf="old-xsrf")
+        coordinator.email = ""
+        coordinator.password = ""
+
+        with pytest.raises(UpdateFailed, match="no credentials"):
+            await coordinator._async_update_data()
+
+    @pytest.mark.asyncio
+    async def test_auth_error_retry_still_fails_raises_update_failed(self) -> None:
+        """A re-login that does not restore access fails cleanly."""
+        client = AsyncMock()
+        client.async_login.return_value = ("new-cookie", "new-xsrf")
+        client.async_get_usage.side_effect = MozillionAuthError("still expired")
+
+        coordinator = _make_coordinator(
+            client,
+            entry_data=MOCK_ENTRY_DATA_LOGIN,
+            cookie="old-cookie",
+            xsrf="old-xsrf",
+        )
+
+        with pytest.raises(UpdateFailed, match="did not restore access"):
+            await coordinator._async_update_data()

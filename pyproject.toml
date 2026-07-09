@@ -47,6 +47,9 @@ filterwarnings = [
     # pytest-asyncio still warns (not errors) about the async autouse fixture;
     # it works correctly under auto mode, so don't fail the build on it.
     "ignore::pytest.PytestDeprecationWarning",
+    # pytest-asyncio / AsyncMock finalization artifact under Python 3.14: a
+    # coroutine created by an AsyncMock is GC'd after the test, which is benign.
+    "ignore::pytest.PytestUnraisableExceptionWarning",
 ]
 
 [tool.coverage.run]
