@@ -60,7 +60,8 @@ ci-local-full:
 # ── Setup ───────────────────────────────────────────────
 venv:
 	python3 -m venv .venv
-	.venv/bin/pip install -r requirements_test.txt
+	.venv/bin/pip install -U pip
+	.venv/bin/pip install -r dev.requirements.txt
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

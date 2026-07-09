@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from homeassistant.components.sensor import (
+    SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
-    SensorDeviceClass,
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -18,6 +19,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from . import MozillionCoordinator
 from .const import (
     ATTR_RAW,
     ATTR_REMAINING,
@@ -27,7 +29,6 @@ from .const import (
     CONF_SIM_NUMBER,
     DOMAIN,
 )
-from . import MozillionCoordinator
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -76,8 +77,8 @@ DATA_SENSORS: tuple[MozillionSensorEntityDescription, ...] = (
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda data: (
-            round(data.get(ATTR_USAGE_PERCENTAGE), 2)
-            if data.get(ATTR_USAGE_PERCENTAGE) is not None
+            round(pct, 2)
+            if (pct := data.get(ATTR_USAGE_PERCENTAGE)) is not None
             else None
         ),
     ),

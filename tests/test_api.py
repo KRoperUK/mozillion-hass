@@ -6,13 +6,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from aiohttp import ClientError, ClientSession
-
 from custom_components.mozillion.api import (
     MozillionClient,
-    _extract_csrf,
     _build_cookie_header,
+    _extract_csrf,
 )
-
 
 # ---------------------------------------------------------------------------
 # _extract_csrf

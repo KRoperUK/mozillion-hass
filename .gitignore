@@ -21,5 +21,11 @@ example-config/.storage.backup/
 *.db
 *.db-shm
 *.db-wal
+coverage.xml
+junit.xml
+.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 example-config/.ha_run.lock
 config/

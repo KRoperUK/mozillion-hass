@@ -14,17 +14,16 @@ Optional:
 
 from __future__ import annotations
 
-import os
 import logging
+import os
 
 import pytest
 import pytest_asyncio
-from dotenv import load_dotenv
 from aiohttp import ClientSession, TCPConnector
 from aiohttp.resolver import ThreadedResolver
-
 from custom_components.mozillion.api import MozillionClient
 from custom_components.mozillion.const import DEFAULT_ORIGIN
+from dotenv import load_dotenv
 
 # Load .env from repo root
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
