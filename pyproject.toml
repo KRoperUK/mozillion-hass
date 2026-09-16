@@ -23,7 +23,9 @@ urls."Issue Tracker" = "https://github.com/KRoperUK/mozillion-hass/issues"
 
 [dependency-groups]
 dev = [
-    "homeassistant==2026.7.1",
+    # homeassistant is pinned transitively by pytest-homeassistant-custom-component;
+    # pinning it here too made the dev group unsatisfiable (the framework pins a
+    # different exact version), which silently broke Dependabot security updates.
     "pytest==9.0.3",
     "pytest-homeassistant-custom-component>=0.13.341",
     "pytest-asyncio>=1.3.0",
