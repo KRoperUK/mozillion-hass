@@ -5,6 +5,13 @@
 
 * **coordinator:** transparently re-authenticate on expired sessions ([a3eafa2](https://github.com/KRoperUK/mozillion-hass/commit/a3eafa25900f4f5f93a5cfa9bd8b022e419f3798))
 
+## [0.6.2](https://github.com/KRoperUK/mozillion-hass/compare/v0.6.1...v0.6.2) (2026-09-16)
+
+
+### Bug Fixes
+
+* **deps:** stop pinning homeassistant against the framework's own pin ([#17](https://github.com/KRoperUK/mozillion-hass/issues/17)) ([f231368](https://github.com/KRoperUK/mozillion-hass/commit/f23136857b265788f99abaf565bbf1de5505e36a))
+
 ## [0.6.1](https://github.com/KRoperUK/mozillion-hass/compare/v0.6.0...v0.6.1) (2026-07-09)
 
 
