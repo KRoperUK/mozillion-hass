@@ -1,6 +1,7 @@
 # Installation & Setup
 
-> **Prerequisites:** A [Mozillion](https://www.mozillion.com/) account with an active mobile plan.
+> **Prerequisites:** A [Mozillion](https://www.mozillion.com/) account with an
+> active mobile plan.
 
 ## HACS (Recommended)
 
@@ -14,7 +15,7 @@
 5. Go to Settings → Devices & Services → Add Integration
 6. Search for "Mozillion" and follow the configuration steps
 
-## Manual Installation
+## Manual installation
 
 1. Download the latest release from [GitHub Releases](https://github.com/KRoperUK/mozillion-hass/releases)
 2. Copy the `custom_components/mozillion` folder to your Home Assistant's `custom_components` directory
@@ -22,20 +23,73 @@
 4. Go to Settings → Devices & Services → Add Integration
 5. Search for "Mozillion" and follow the configuration steps
 
-## Configuration
+## Authentication
 
-### Option A — Auto-login
+You need either the first option (recommended) or the second.
 
-Provide your Mozillion **email**, **password**, and optional **TOTP secret** (Base32) if two-factor authentication is enabled. Leave the cookie and XSRF fields blank; the integration logs in and handles 2FA automatically.
+### Option A — email and password
 
-### Option B — Manual cookies
+1. Enter your Mozillion **email** and **password**.
+2. If two-factor authentication is enabled on your account, enter the **TOTP
+   secret**. Either paste the Base32 secret itself, or paste the whole
+   `otpauth://totp/…?secret=…` link that Mozillion's QR code encodes — both work.
+   Spaces, dashes and lower-case letters are tolerated.
 
-1. Log into Mozillion in your browser
-2. Open Developer Tools → Application → Cookies
-3. Copy the full `Cookie` header and paste it into the integration
-4. Copy the decoded `XSRF-TOKEN` value
+The integration logs in, answers the 2FA challenge, and refreshes the session on
+its own afterwards.
 
-### Additional settings
+### Option B — session cookie
 
-- **Order Detail ID** — your Mozillion order identifier (found in the URL when viewing your plan)
-- **Data keys** — customize the JSON paths for `data_usage` and `data_remaining` if they differ from the defaults
+1. Log into Mozillion in your browser.
+2. Open Developer Tools → Application → Cookies → `https://www.mozillion.com`.
+3. Copy the **Cookie** header value and paste it into the *Cookie header* field.
+4. Optionally copy the `XSRF-TOKEN` cookie into the *XSRF token header* field.
+
+A cookie cannot be renewed by the integration, so when it expires you will be
+asked to re-authenticate. Prefer Option A if you want unattended operation.
+
+## Installation parameters
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| Email | With Option A | Mozillion account email |
+| Password | With Option A | Mozillion account password |
+| TOTP secret | If 2FA is on | Base32 secret or a full `otpauth://` link |
+| Origin header | No | Advanced. Overrides the `Origin` sent when logging in |
+| Cookie header | With Option B | Advanced. Full browser cookie string |
+| XSRF token header | No | Advanced. Decoded `XSRF-TOKEN` cookie value |
+| Scan interval | No | Advanced. Seconds between polls, minimum 60 |
+
+After the credentials are accepted you are shown a **SIM** dropdown listing the
+SIMs on your account, each labelled with its phone number and plan tariff. Pick
+the one to track.
+
+If the SIM list cannot be read, you are asked for the ids manually:
+
+| Field | Required | Where to find it |
+| --- | --- | --- |
+| Order detail ID | Yes | `data-orderdetail-id` on the SIM buttons in the dashboard's page source |
+| SIM meta ID | Yes | `data-sim-id` on the same element |
+| SIM number | No | Used only for naming the device |
+
+## Configuration parameters
+
+Options are reached through *Settings → Devices & Services → Mozillion →
+Configure*.
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| Scan interval | 3600 seconds | How often Home Assistant polls. Each poll also asks Mozillion to regenerate the figures, so there is no benefit in polling faster than the provider updates |
+
+Changing credentials or moving an entry to a different SIM is done with the
+**Reconfigure** action on the integration page, which keeps the entry, its
+entities and their history.
+
+## Removal
+
+1. Go to *Settings → Devices & Services*.
+2. Find **Mozillion Data**.
+3. Open the ⋮ menu on the entry and choose **Delete**.
+4. Confirm. The config entry, its device and all of its entities are removed.
+5. If you installed through HACS, optionally remove the repository from HACS and
+   delete `custom_components/mozillion` to remove the code as well.

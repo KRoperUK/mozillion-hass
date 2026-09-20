@@ -1,0 +1,23 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "unlimited": {
+        "default": "mdi:infinity"
+      }
+    },
+    "sensor": {
+      "usage": {
+        "default": "mdi:sim"
+      },
+      "total": {
+        "default": "mdi:sim-outline"
+      },
+      "remaining": {
+        "default": "mdi:sim-outline"
+      },
+      "usage_percentage": {
+        "default": "mdi:percent"
+      }
+    }
+  }
+}

@@ -3,370 +3,411 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import MozillionClient
+from .api import MozillionClient, MozillionSim
 from .const import (
     CONF_EMAIL,
+    CONF_ICCID,
     CONF_ORDER_DETAIL_ID,
     CONF_ORIGIN,
     CONF_PASSWORD,
-    CONF_REMAINING_KEY,
     CONF_SCAN_INTERVAL,
     CONF_SESSION_COOKIE,
+    CONF_SIM_META_ID,
     CONF_SIM_NUMBER,
-    CONF_SIM_PLAN_ID,
     CONF_TOTP_SECRET,
-    CONF_USAGE_KEY,
     CONF_XSRF_TOKEN,
     DEFAULT_ORIGIN,
-    DEFAULT_REMAINING_KEY,
     DEFAULT_SCAN_INTERVAL,
-    DEFAULT_USAGE_KEY,
     DOMAIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def _validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-    """Validate the user input by performing a single fetch."""
+def _credentials_schema(
+    defaults: Mapping[str, Any] | None = None,
+) -> dict[Any, Any]:
+    """Build the shared credential fields used by setup and reauth."""
 
-    session = async_get_clientsession(hass)
-    client = MozillionClient(session)
-    cookie_header = data.get(CONF_SESSION_COOKIE)
-    xsrf_token = data.get(CONF_XSRF_TOKEN)
+    defaults = defaults or {}
+
+    def default(key: str) -> str:
+        return str(defaults.get(key) or "")
+
+    return {
+        vol.Optional(CONF_EMAIL, default=default(CONF_EMAIL)): selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.EMAIL)
+        ),
+        vol.Optional(CONF_PASSWORD, default=""): selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+        ),
+        vol.Optional(
+            CONF_TOTP_SECRET, default=default(CONF_TOTP_SECRET)
+        ): selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
+        ),
+        vol.Optional(
+            CONF_ORIGIN,
+            default=default(CONF_ORIGIN) or DEFAULT_ORIGIN,
+            description={"advanced": True},
+        ): selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.URL)
+        ),
+        vol.Optional(
+            CONF_SESSION_COOKIE,
+            default="",
+            description={"advanced": True},
+        ): selector.TextSelector(
+            selector.TextSelectorConfig(
+                type=selector.TextSelectorType.TEXT, multiline=True
+            )
+        ),
+        vol.Optional(
+            CONF_XSRF_TOKEN,
+            default="",
+            description={"advanced": True},
+        ): selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
+        ),
+    }
+
+
+async def _async_authenticate(
+    client: MozillionClient, data: dict[str, Any]
+) -> dict[str, Any]:
+    """Resolve the session to use, logging in when credentials are supplied."""
 
     email = data.get(CONF_EMAIL)
     password = data.get(CONF_PASSWORD)
-    totp_secret = data.get(CONF_TOTP_SECRET) or None
-    origin = data.get(CONF_ORIGIN, DEFAULT_ORIGIN)
 
     if email and password:
-        _LOGGER.debug("Config flow validating login for %s", email)
+        _LOGGER.debug("Authenticating with credentials for %s", email)
         cookie_header, xsrf_token = await client.async_login(
             email=email,
             password=password,
-            totp_secret=totp_secret,
-            origin=origin,
+            totp_secret=data.get(CONF_TOTP_SECRET) or None,
+            origin=data.get(CONF_ORIGIN, DEFAULT_ORIGIN),
         )
         data[CONF_SESSION_COOKIE] = cookie_header
         if xsrf_token:
             data[CONF_XSRF_TOKEN] = xsrf_token
 
-    if not cookie_header:
+    if not data.get(CONF_SESSION_COOKIE):
         raise ValueError("missing_auth")
 
+    return data
+
+
+async def _validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
+    """Validate the entry by performing a single usage fetch."""
+
+    client = MozillionClient(async_get_clientsession(hass))
     await client.async_get_usage(
         order_detail_id=data[CONF_ORDER_DETAIL_ID],
-        sim_plan_id=data[CONF_SIM_PLAN_ID],
-        cookie_header=cookie_header,
-        xsrf_token=xsrf_token,
+        sim_meta_id=data[CONF_SIM_META_ID],
+        cookie_header=data.get(CONF_SESSION_COOKIE, ""),
+        xsrf_token=data.get(CONF_XSRF_TOKEN),
     )
     _LOGGER.debug(
-        "Validated usage fetch for order_detail_id=%s sim_plan_id=%s",
+        "Validated usage fetch for order_detail_id=%s sim_meta_id=%s",
         data[CONF_ORDER_DETAIL_ID],
-        data[CONF_SIM_PLAN_ID],
+        data[CONF_SIM_META_ID],
     )
-    return data
 
 
 class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     """Handle a config flow for Mozillion."""
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self) -> None:
         """Initialize config flow."""
+        super().__init__()
         self._credentials: dict[str, Any] = {}
         self._cookie_header: str | None = None
         self._xsrf_token: str | None = None
-        self._plans: list[dict[str, str]] = []
+        self._sims: list[MozillionSim] = []
+        # Set while reconfiguring an existing entry, so the assembled data
+        # updates that entry instead of creating a second one.
+        self._reconfigure_entry: config_entries.ConfigEntry | None = None
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
+        """Handle the initial credentials step."""
+
         errors: dict[str, str] = {}
 
         if user_input is not None:
             _LOGGER.debug(
                 "Mozillion config flow: user step with keys=%s", list(user_input)
             )
-            session = async_get_clientsession(self.hass)
-            client = MozillionClient(session)
+            client = MozillionClient(async_get_clientsession(self.hass))
 
-            email = user_input.get(CONF_EMAIL)
-            password = user_input.get(CONF_PASSWORD)
-            totp_secret = user_input.get(CONF_TOTP_SECRET) or None
-            origin = user_input.get(CONF_ORIGIN, DEFAULT_ORIGIN)
-            cookie_header = user_input.get(CONF_SESSION_COOKIE)
-            xsrf_token = user_input.get(CONF_XSRF_TOKEN)
+            try:
+                data = await _async_authenticate(client, dict(user_input))
+            except ValueError:
+                errors["base"] = "missing_auth"
+            except RuntimeError:
+                _LOGGER.exception("Login failed during user step")
+                errors["base"] = "cannot_connect"
+            else:
+                self._credentials = data
+                self._cookie_header = data.get(CONF_SESSION_COOKIE)
+                self._xsrf_token = data.get(CONF_XSRF_TOKEN)
 
-            # Try login if credentials provided
-            if email and password:
                 try:
-                    cookie_header, xsrf_token = await client.async_login(
-                        email=email,
-                        password=password,
-                        totp_secret=totp_secret,
-                        origin=origin,
+                    self._sims = await client.async_fetch_sims(
+                        cookie_header=self._cookie_header or "",
+                        xsrf_token=self._xsrf_token,
                     )
-                except RuntimeError:
-                    _LOGGER.exception("Login failed during user step")
-                    errors["base"] = "cannot_connect"
-
-            if not errors and cookie_header:
-                # Store credentials and cookies for next step
-                self._credentials = user_input
-                self._cookie_header = cookie_header
-                self._xsrf_token = xsrf_token
-
-                # Try to fetch plans automatically
-                try:
-                    self._plans = await client.async_fetch_dashboard_ids(
-                        cookie_header=cookie_header,
-                        xsrf_token=xsrf_token,
-                    )
-                    _LOGGER.debug("Fetched %d plans from dashboard", len(self._plans))
                 except RuntimeError:
                     _LOGGER.exception(
-                        "Failed to fetch plans; falling back to manual IDs"
+                        "Failed to fetch the SIM list; falling back to manual entry"
                     )
-                    self._plans = []
+                    self._sims = []
 
-                if self._plans:
-                    # Go to plan selection
-                    return await self.async_step_select_plan()
-                else:
-                    # No plans found, go to manual entry
-                    return await self.async_step_manual_ids()
-            elif not cookie_header:
-                _LOGGER.debug("No cookie header available after user step")
-                errors["base"] = "missing_auth"
-
-        data_schema = vol.Schema(
-            {
-                vol.Optional(CONF_EMAIL, default=""): selector.TextSelector(
-                    selector.TextSelectorConfig(type=selector.TextSelectorType.EMAIL)
-                ),
-                vol.Optional(CONF_PASSWORD, default=""): selector.TextSelector(
-                    selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
-                ),
-                vol.Optional(CONF_TOTP_SECRET, default=""): selector.TextSelector(
-                    selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
-                ),
-                vol.Optional(
-                    CONF_ORIGIN,
-                    default=DEFAULT_ORIGIN,
-                    description={"advanced": True},
-                ): selector.TextSelector(
-                    selector.TextSelectorConfig(type=selector.TextSelectorType.URL)
-                ),
-                vol.Optional(
-                    CONF_SESSION_COOKIE,
-                    default="",
-                    description={"advanced": True},
-                ): selector.TextSelector(
-                    selector.TextSelectorConfig(
-                        type=selector.TextSelectorType.TEXT, multiline=True
-                    )
-                ),
-                vol.Optional(
-                    CONF_XSRF_TOKEN,
-                    default="",
-                    description={"advanced": True},
-                ): selector.TextSelector(
-                    selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
-                ),
-                vol.Optional(
-                    CONF_USAGE_KEY,
-                    default=DEFAULT_USAGE_KEY,
-                    description={"advanced": True},
-                ): selector.TextSelector(
-                    selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
-                ),
-                vol.Optional(
-                    CONF_REMAINING_KEY,
-                    default=DEFAULT_REMAINING_KEY,
-                    description={"advanced": True},
-                ): selector.TextSelector(
-                    selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
-                ),
-                vol.Optional(
-                    CONF_SCAN_INTERVAL,
-                    default=DEFAULT_SCAN_INTERVAL,
-                    description={"advanced": True},
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        mode=selector.NumberSelectorMode.BOX, min=60
-                    )
-                ),
-            }
-        )
+                if self._sims:
+                    return await self.async_step_select_sim()
+                return await self.async_step_manual_ids()
 
         return self.async_show_form(
-            step_id="user", data_schema=data_schema, errors=errors
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    **_credentials_schema(),
+                    vol.Optional(
+                        CONF_SCAN_INTERVAL,
+                        default=DEFAULT_SCAN_INTERVAL,
+                        description={"advanced": True},
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            mode=selector.NumberSelectorMode.BOX, min=60
+                        )
+                    ),
+                }
+            ),
+            errors=errors,
         )
 
-    async def async_step_select_plan(
+    def _sim_choices(self) -> dict[str, MozillionSim]:
+        """Return a label -> SIM mapping, keeping labels unique."""
+
+        choices: dict[str, MozillionSim] = {}
+        for sim in self._sims:
+            label = sim.display_name
+            if label in choices:
+                label = f"{label} [{sim.sim_meta_id}]"
+            choices[label] = sim
+        return choices
+
+    async def async_step_select_sim(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Let user select from available plans."""
+        """Let the user pick which SIM to track."""
+
+        choices = self._sim_choices()
+        if not choices:
+            return await self.async_step_manual_ids()
+
+        errors: dict[str, str] = {}
 
         if user_input is not None:
-            _LOGGER.debug("Mozillion config flow: select_plan input=%s", user_input)
-            selected = user_input["plan"]
-            # Find the selected plan
-            plan = next(
-                (
-                    p
-                    for p in self._plans
-                    if f"{p['name']} (SIM: {p['sim_plan_id']})" == selected
-                ),
-                None,
-            )
-            if plan:
-                # Merge with stored credentials
-                data = {**self._credentials}
-                data[CONF_ORDER_DETAIL_ID] = plan["order_detail_id"]
-                data[CONF_SIM_PLAN_ID] = plan["sim_plan_id"]
-                data[CONF_SIM_NUMBER] = plan.get("sim_number", "")
-                data[CONF_SESSION_COOKIE] = self._cookie_header
-                if self._xsrf_token:
-                    data[CONF_XSRF_TOKEN] = self._xsrf_token
+            sim = choices.get(user_input["sim"])
+            if sim is None:
+                errors["base"] = "cannot_connect"
+            else:
+                data = {
+                    **self._credentials,
+                    CONF_ORDER_DETAIL_ID: sim.order_detail_id,
+                    CONF_SIM_META_ID: sim.sim_meta_id,
+                    CONF_SIM_NUMBER: sim.sim_number,
+                    CONF_ICCID: sim.iccid,
+                    CONF_SESSION_COOKIE: self._cookie_header or "",
+                    CONF_XSRF_TOKEN: self._xsrf_token or "",
+                }
+                result = await self._async_create_entry(data, title=sim.display_name)
+                if result is not None:
+                    return result
+                errors["base"] = "cannot_connect"
 
-                # Validate the selection
-                try:
-                    await _validate_input(self.hass, data)
-                except (RuntimeError, ValueError):
-                    _LOGGER.exception(
-                        "Validation failed after plan selection; "
-                        "redirecting to manual IDs"
-                    )
-                    return await self.async_step_manual_ids({"error": "cannot_connect"})
-
-                await self.async_set_unique_id(data[CONF_ORDER_DETAIL_ID])
-                self._abort_if_unique_id_configured()
-                # Title defaults to plan name when available
-                name = data.get(CONF_NAME, plan["name"])
-                return self.async_create_entry(title=name, data=data)
-            _LOGGER.debug("Plan selection not found in available plans")
-
-        # Build dropdown options
-        plan_options = [f"{p['name']} (SIM: {p['sim_plan_id']})" for p in self._plans]
-
-        data_schema = vol.Schema(
-            {
-                vol.Required("plan"): vol.In(plan_options),
-            }
+        return self.async_show_form(
+            step_id="select_sim",
+            data_schema=vol.Schema({vol.Required("sim"): vol.In(list(choices))}),
+            errors=errors,
         )
-
-        return self.async_show_form(step_id="select_plan", data_schema=data_schema)
 
     async def async_step_manual_ids(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Manual entry of order and SIM plan IDs."""
+        """Manual entry of the order and SIM ids."""
 
         errors: dict[str, str] = {}
-        if user_input and user_input.get("error"):
-            errors["base"] = user_input["error"]
 
-        if user_input is not None and not errors:
+        if user_input is not None:
             _LOGGER.debug("Mozillion config flow: manual_ids keys=%s", list(user_input))
-            # Merge with stored credentials
-            data = {**self._credentials}
-            data[CONF_ORDER_DETAIL_ID] = user_input[CONF_ORDER_DETAIL_ID]
-            data[CONF_SIM_PLAN_ID] = user_input[CONF_SIM_PLAN_ID]
-            data[CONF_SIM_NUMBER] = user_input.get(CONF_SIM_NUMBER, "")
-            data[CONF_SESSION_COOKIE] = self._cookie_header
-            if self._xsrf_token:
-                data[CONF_XSRF_TOKEN] = self._xsrf_token
-
-            # Validate
-            try:
-                await _validate_input(self.hass, data)
-            except ValueError as err:
-                _LOGGER.debug("Validation error in manual IDs: %s", err)
-                errors["base"] = str(err)
-            except RuntimeError:
-                _LOGGER.exception("Unexpected error validating manual IDs")
-                errors["base"] = "cannot_connect"
-            else:
-                await self.async_set_unique_id(data[CONF_ORDER_DETAIL_ID])
-                self._abort_if_unique_id_configured()
-                # Title defaults to a generic label when not specified
-                name = data.get(CONF_NAME, "Mozillion")
-                return self.async_create_entry(title=name, data=data)
-
-        data_schema = vol.Schema(
-            {
-                vol.Required(CONF_ORDER_DETAIL_ID): str,
-                vol.Required(CONF_SIM_PLAN_ID): str,
-                vol.Optional(CONF_SIM_NUMBER, default=""): str,
+            data = {
+                **self._credentials,
+                CONF_ORDER_DETAIL_ID: user_input[CONF_ORDER_DETAIL_ID],
+                CONF_SIM_META_ID: user_input[CONF_SIM_META_ID],
+                CONF_SIM_NUMBER: user_input.get(CONF_SIM_NUMBER, ""),
+                CONF_SESSION_COOKIE: self._cookie_header or "",
+                CONF_XSRF_TOKEN: self._xsrf_token or "",
             }
-        )
+            title = (
+                f"Mozillion {data[CONF_SIM_NUMBER]}"
+                if data[CONF_SIM_NUMBER]
+                else "Mozillion"
+            )
+            result = await self._async_create_entry(data, title=title)
+            if result is not None:
+                return result
+            errors["base"] = "cannot_connect"
 
         return self.async_show_form(
-            step_id="manual_ids", data_schema=data_schema, errors=errors
+            step_id="manual_ids",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_ORDER_DETAIL_ID): str,
+                    vol.Required(CONF_SIM_META_ID): str,
+                    vol.Optional(CONF_SIM_NUMBER, default=""): str,
+                }
+            ),
+            errors=errors,
+        )
+
+    async def _async_create_entry(
+        self, data: dict[str, Any], title: str
+    ) -> config_entries.ConfigFlowResult | None:
+        """Validate the assembled entry and create it.
+
+        Returns ``None`` when validation fails so the caller can re-show its
+        own form with an error.
+        """
+
+        try:
+            await _validate_input(self.hass, data)
+        except RuntimeError:
+            _LOGGER.exception("Validation failed while creating the config entry")
+            return None
+
+        if self._reconfigure_entry is not None:
+            # Reconfigure in place: the entry id, its entities and its history
+            # are all preserved.
+            return self.async_update_reload_and_abort(
+                self._reconfigure_entry,
+                data=data,
+                title=title,
+                unique_id=data[CONF_SIM_META_ID],
+            )
+
+        await self.async_set_unique_id(data[CONF_SIM_META_ID])
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(title=title, data=data)
+
+    async def async_step_reconfigure(
+        self, entry_data: Mapping[str, Any]
+    ) -> config_entries.ConfigFlowResult:
+        """Start reconfiguration of an existing entry."""
+
+        self._reconfigure_entry = self._get_reconfigure_entry()
+        return await self.async_step_reconfigure_confirm()
+
+    async def async_step_reconfigure_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Re-authenticate, then let the SIM be chosen again."""
+
+        entry = self._reconfigure_entry or self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            client = MozillionClient(async_get_clientsession(self.hass))
+            try:
+                data = await _async_authenticate(client, dict(user_input))
+            except ValueError:
+                errors["base"] = "missing_auth"
+            except RuntimeError:
+                _LOGGER.exception("Reconfigure login failed")
+                errors["base"] = "cannot_connect"
+            else:
+                self._credentials = data
+                self._cookie_header = data.get(CONF_SESSION_COOKIE)
+                self._xsrf_token = data.get(CONF_XSRF_TOKEN)
+                try:
+                    self._sims = await client.async_fetch_sims(
+                        cookie_header=self._cookie_header or "",
+                        xsrf_token=self._xsrf_token,
+                    )
+                except RuntimeError:
+                    _LOGGER.exception("Failed to fetch the SIM list")
+                    self._sims = []
+
+                if self._sims:
+                    return await self.async_step_select_sim()
+                return await self.async_step_manual_ids()
+
+        return self.async_show_form(
+            step_id="reconfigure_confirm",
+            data_schema=vol.Schema(_credentials_schema(entry.data)),
+            errors=errors,
         )
 
     async def async_step_reauth(
+        self, entry_data: Mapping[str, Any]
+    ) -> config_entries.ConfigFlowResult:
+        """Handle re-authentication when the session expires.
+
+        Home Assistant calls this with the entry's stored data, so the form is
+        always shown first — treating that argument as a submission would
+        silently re-submit the credentials that just failed.
+        """
+
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Handle re-authentication when the session expires without credentials."""
+        """Collect fresh credentials or a fresh session cookie."""
 
         errors: dict[str, str] = {}
         existing = self._get_reauth_entry()
 
         if user_input is not None:
-            session = async_get_clientsession(self.hass)
-            client = MozillionClient(session)
-
-            email = user_input.get(CONF_EMAIL)
-            password = user_input.get(CONF_PASSWORD)
-            totp_secret = user_input.get(CONF_TOTP_SECRET) or None
-            origin = user_input.get(CONF_ORIGIN, DEFAULT_ORIGIN)
-            cookie_header = user_input.get(CONF_SESSION_COOKIE)
-            xsrf_token = user_input.get(CONF_XSRF_TOKEN)
-
-            if email and password:
-                try:
-                    cookie_header, xsrf_token = await client.async_login(
-                        email=email,
-                        password=password,
-                        totp_secret=totp_secret,
-                        origin=origin,
-                    )
-                except RuntimeError:
-                    _LOGGER.exception("Reauth login failed")
-                    errors["base"] = "cannot_connect"
-
-            if not errors and cookie_header:
+            client = MozillionClient(async_get_clientsession(self.hass))
+            try:
+                updated = await _async_authenticate(client, dict(user_input))
+            except ValueError:
+                errors["base"] = "missing_auth"
+            except RuntimeError:
+                _LOGGER.exception("Reauth login failed")
+                errors["base"] = "cannot_connect"
+            else:
                 new_data = {
                     **existing.data,
-                    CONF_EMAIL: email or existing.data.get(CONF_EMAIL, ""),
-                    CONF_PASSWORD: password or existing.data.get(CONF_PASSWORD, ""),
-                    CONF_TOTP_SECRET: (
-                        totp_secret or existing.data.get(CONF_TOTP_SECRET, "")
-                    ),
-                    CONF_ORIGIN: (
-                        origin or existing.data.get(CONF_ORIGIN, DEFAULT_ORIGIN)
-                    ),
-                    CONF_SESSION_COOKIE: cookie_header,
-                    CONF_XSRF_TOKEN: xsrf_token or "",
+                    CONF_EMAIL: updated.get(CONF_EMAIL)
+                    or existing.data.get(CONF_EMAIL, ""),
+                    CONF_PASSWORD: updated.get(CONF_PASSWORD)
+                    or existing.data.get(CONF_PASSWORD, ""),
+                    CONF_TOTP_SECRET: updated.get(CONF_TOTP_SECRET)
+                    or existing.data.get(CONF_TOTP_SECRET, ""),
+                    CONF_ORIGIN: updated.get(CONF_ORIGIN)
+                    or existing.data.get(CONF_ORIGIN, DEFAULT_ORIGIN),
+                    CONF_SESSION_COOKIE: updated.get(CONF_SESSION_COOKIE, ""),
+                    CONF_XSRF_TOKEN: updated.get(CONF_XSRF_TOKEN, ""),
                 }
-
                 try:
                     await _validate_input(self.hass, new_data)
-                except (RuntimeError, ValueError):
+                except RuntimeError:
                     _LOGGER.exception("Reauth validation failed")
                     errors["base"] = "cannot_connect"
                 else:
@@ -375,41 +416,11 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ig
                         data=new_data,
                         reason="reauth_successful",
                     )
-            elif not cookie_header:
-                errors["base"] = "missing_auth"
-
-        data_schema = vol.Schema(
-            {
-                vol.Optional(CONF_EMAIL, default=""): selector.TextSelector(
-                    selector.TextSelectorConfig(type=selector.TextSelectorType.EMAIL)
-                ),
-                vol.Optional(CONF_PASSWORD, default=""): selector.TextSelector(
-                    selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
-                ),
-                vol.Optional(CONF_TOTP_SECRET, default=""): selector.TextSelector(
-                    selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
-                ),
-                vol.Optional(
-                    CONF_SESSION_COOKIE,
-                    default="",
-                    description={"advanced": True},
-                ): selector.TextSelector(
-                    selector.TextSelectorConfig(
-                        type=selector.TextSelectorType.TEXT, multiline=True
-                    )
-                ),
-                vol.Optional(
-                    CONF_XSRF_TOKEN,
-                    default="",
-                    description={"advanced": True},
-                ): selector.TextSelector(
-                    selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
-                ),
-            }
-        )
 
         return self.async_show_form(
-            step_id="reauth", data_schema=data_schema, errors=errors
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(_credentials_schema(existing.data)),
+            errors=errors,
         )
 
     async def async_step_import(
@@ -430,34 +441,21 @@ class MozillionOptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        errors: dict[str, str] = {}
+        """Manage the polling interval."""
 
         if user_input is not None:
             return self.async_create_entry(title="Options", data=user_input)
 
-        data_schema = vol.Schema(
-            {
-                vol.Optional(
-                    CONF_SCAN_INTERVAL,
-                    default=self.config_entry.options.get(
-                        CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
-                    ),
-                ): int,
-                vol.Optional(
-                    CONF_USAGE_KEY,
-                    default=self.config_entry.data.get(
-                        CONF_USAGE_KEY, DEFAULT_USAGE_KEY
-                    ),
-                ): str,
-                vol.Optional(
-                    CONF_REMAINING_KEY,
-                    default=self.config_entry.data.get(
-                        CONF_REMAINING_KEY, DEFAULT_REMAINING_KEY
-                    ),
-                ): str,
-            }
+        current = self.config_entry.options.get(
+            CONF_SCAN_INTERVAL,
+            self.config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
         )
 
         return self.async_show_form(
-            step_id="init", data_schema=data_schema, errors=errors
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_SCAN_INTERVAL, default=current): int,
+                }
+            ),
         )

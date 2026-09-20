@@ -5,39 +5,45 @@
         "title": "Mozillion",
         "description": "Connect to Mozillion to fetch data usage.",
         "data": {
-          "name": "Name",
           "email": "Email",
           "password": "Password",
           "totp_secret": "TOTP secret (Base32, optional)",
           "origin": "Origin header (optional)",
-          "order_detail_id": "Order detail ID",
-          "sim_plan_id": "SIM plan ID",
           "session_cookie": "Cookie header (optional if using login)",
           "xsrf_token": "XSRF token header (optional)",
-          "usage_key": "Usage JSON key (dotted)",
-          "remaining_key": "Remaining JSON key (dotted)",
           "scan_interval": "Scan interval (seconds)"
         }
       },
-      "select_plan": {
-        "title": "Select SIM Plan",
-        "description": "Choose your SIM plan from the list.",
+      "select_sim": {
+        "title": "Select SIM",
+        "description": "Choose which SIM to track.",
         "data": {
-          "plan": "SIM Plan"
+          "sim": "SIM"
         }
       },
       "manual_ids": {
         "title": "Enter IDs Manually",
-        "description": "Enter your order detail ID and SIM plan ID.",
+        "description": "Enter your order detail ID and SIM meta ID. Both are visible on the Mozillion dashboard's SIM selector.",
         "data": {
           "order_detail_id": "Order detail ID",
-          "sim_plan_id": "SIM plan ID",
+          "sim_meta_id": "SIM meta ID",
           "sim_number": "SIM number (optional)"
         }
       },
-      "reauth": {
+      "reauth_confirm": {
         "title": "Re-authenticate Mozillion",
         "description": "Your Mozillion session has expired. Provide new credentials or a fresh cookie header.",
+        "data": {
+          "email": "Email",
+          "password": "Password",
+          "totp_secret": "TOTP secret (Base32, optional)",
+          "session_cookie": "Cookie header (optional if using login)",
+          "xsrf_token": "XSRF token header (optional)"
+        }
+      },
+      "reconfigure_confirm": {
+        "title": "Reconfigure Mozillion",
+        "description": "Update the credentials or pick a different SIM to track.",
         "data": {
           "email": "Email",
           "password": "Password",
@@ -48,11 +54,13 @@
       }
     },
     "error": {
-      "cannot_connect": "Cannot connect, check cookies or credentials and order detail ID.",
+      "cannot_connect": "Cannot connect. Check your credentials, cookie header and that the SIM is still on your account.",
       "missing_auth": "Provide either email+password (and optional TOTP) or a cookie header."
     },
     "abort": {
-      "reauth_successful": "Re-authentication successful."
+      "reauth_successful": "Re-authentication successful.",
+      "already_configured": "This SIM is already configured.",
+      "reconfigure_successful": "Reconfiguration successful."
     }
   },
   "options": {
@@ -60,10 +68,29 @@
       "init": {
         "title": "Mozillion options",
         "data": {
-          "scan_interval": "Scan interval (seconds)",
-          "usage_key": "Usage JSON key (dotted)",
-          "remaining_key": "Remaining JSON key (dotted)"
+          "scan_interval": "Scan interval (seconds)"
         }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "usage": {
+        "name": "Usage"
+      },
+      "total": {
+        "name": "Total"
+      },
+      "remaining": {
+        "name": "Remaining"
+      },
+      "usage_percentage": {
+        "name": "Usage Percentage"
+      }
+    },
+    "binary_sensor": {
+      "unlimited": {
+        "name": "Unlimited"
       }
     }
   }

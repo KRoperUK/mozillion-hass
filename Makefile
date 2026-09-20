@@ -20,13 +20,14 @@ restart: down up
 
 # ── Testing ─────────────────────────────────────────────
 test:
-	$(PYTHON) -m pytest tests/ --ignore=tests/test_live.py -v
+	$(PYTHON) -m pytest tests/ -v
 
+# Hits the real Mozillion API; needs MOZILLION_EMAIL/MOZILLION_PASSWORD in .env.
+# Not a pytest module: the HA test plugin disables DNS for every pytest test.
 test-live:
-	$(PYTHON) -m pytest tests/test_live.py -v --log-cli-level=INFO
+	$(PYTHON) scripts/live_check.py
 
-test-all:
-	$(PYTHON) -m pytest tests/ -v --log-cli-level=INFO
+test-all: test test-live
 
 # ── Linting & Formatting ───────────────────────────────
 lint:

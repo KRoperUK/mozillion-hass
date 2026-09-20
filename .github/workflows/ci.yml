@@ -115,7 +115,6 @@ jobs:
       - name: Run tests with coverage
         run: >-
           source .venv/bin/activate && pytest tests/
-          --ignore=tests/test_live.py
           --cov=custom_components/mozillion --cov-branch
           --cov-report=xml --cov-report=term-missing
           --junitxml=junit.xml -o junit_family=legacy

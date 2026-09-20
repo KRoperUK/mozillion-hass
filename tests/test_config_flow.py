@@ -1,4 +1,4 @@
-"""Tests for the Mozillion config flow."""
+"""Tests for the Mozillion config flow, using the real Home Assistant harness."""
 
 from __future__ import annotations
 
@@ -6,231 +6,227 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from custom_components.mozillion.config_flow import (
-    MozillionConfigFlow,
-    MozillionOptionsFlowHandler,
-)
+from custom_components.mozillion.api import MozillionAuthError, MozillionSim
 from custom_components.mozillion.const import (
     CONF_EMAIL,
+    CONF_ICCID,
     CONF_ORDER_DETAIL_ID,
-    CONF_ORIGIN,
     CONF_PASSWORD,
-    CONF_REMAINING_KEY,
     CONF_SCAN_INTERVAL,
     CONF_SESSION_COOKIE,
+    CONF_SIM_META_ID,
     CONF_SIM_NUMBER,
-    CONF_SIM_PLAN_ID,
     CONF_TOTP_SECRET,
-    CONF_USAGE_KEY,
     CONF_XSRF_TOKEN,
-    DEFAULT_ORIGIN,
-    DEFAULT_REMAINING_KEY,
     DEFAULT_SCAN_INTERVAL,
-    DEFAULT_USAGE_KEY,
+    DOMAIN,
 )
+from homeassistant import config_entries, data_entry_flow
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-# ---------------------------------------------------------------------------
-# Shared helpers
-# ---------------------------------------------------------------------------
+from tests.conftest import MOCK_ENTRY_DATA_COOKIE, MOCK_SIM
+
+pytestmark = pytest.mark.asyncio
+
+CLIENT = "custom_components.mozillion.config_flow.MozillionClient"
 
 
-def _user_input_login(**overrides: Any) -> dict[str, Any]:
-    """Build a default user input dict for the login path."""
+@pytest.fixture(autouse=True)
+def _enable_custom_integrations(enable_custom_integrations):
+    """Register this repo's custom integration with the test hass."""
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _bypass_setup():
+    """Stop entry setup from reaching the network during flow tests."""
+
+    with patch("custom_components.mozillion.async_setup_entry", return_value=True):
+        yield
+
+
+def _login_input(**overrides: Any) -> dict[str, Any]:
     base = {
         CONF_EMAIL: "user@example.com",
         CONF_PASSWORD: "secret123",
         CONF_TOTP_SECRET: "",
-        CONF_ORIGIN: DEFAULT_ORIGIN,
         CONF_SESSION_COOKIE: "",
         CONF_XSRF_TOKEN: "",
-        CONF_USAGE_KEY: DEFAULT_USAGE_KEY,
-        CONF_REMAINING_KEY: DEFAULT_REMAINING_KEY,
         CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
     }
     base.update(overrides)
     return base
 
 
-def _user_input_cookie(**overrides: Any) -> dict[str, Any]:
-    """Build a default user input dict for the cookie path."""
+def _cookie_input(**overrides: Any) -> dict[str, Any]:
     base = {
         CONF_EMAIL: "",
         CONF_PASSWORD: "",
         CONF_TOTP_SECRET: "",
-        CONF_ORIGIN: DEFAULT_ORIGIN,
         CONF_SESSION_COOKIE: "mozillion_session=abc; XSRF-TOKEN=xyz",
         CONF_XSRF_TOKEN: "xyz",
-        CONF_USAGE_KEY: DEFAULT_USAGE_KEY,
-        CONF_REMAINING_KEY: DEFAULT_REMAINING_KEY,
         CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
     }
     base.update(overrides)
     return base
 
 
-def _make_flow(hass: MagicMock) -> MozillionConfigFlow:
-    """Create a flow with a mocked hass."""
-    flow = MozillionConfigFlow()
-    flow.hass = hass
-    return flow
+def _credentials_only(data: dict[str, Any]) -> dict[str, Any]:
+    """Drop fields that are not part of the reauth credentials form."""
+    return {key: value for key, value in data.items() if key != CONF_SCAN_INTERVAL}
+
+
+def _mock_client(
+    *,
+    sims: list[Any] | None = None,
+    login_error: Exception | None = None,
+    usage_error: Exception | None = None,
+) -> MagicMock:
+    """Build a stand-in MozillionClient."""
+
+    client = MagicMock()
+    client.async_login = AsyncMock(
+        side_effect=login_error,
+        return_value=("mozillion_session=abc; XSRF-TOKEN=xyz", "xyz"),
+    )
+    client.async_fetch_sims = AsyncMock(
+        side_effect=usage_error, return_value=sims if sims is not None else [MOCK_SIM]
+    )
+    client.async_get_usage = AsyncMock(
+        side_effect=usage_error, return_value={"status": "success"}
+    )
+    return client
+
+
+async def _start_user_flow(hass: HomeAssistant):
+    return await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
 
 
 # ---------------------------------------------------------------------------
-# async_step_user – show form
+# async_step_user
 # ---------------------------------------------------------------------------
 
 
-class TestUserStepForm:
-    """Tests for the initial user form display."""
+async def test_user_form_is_shown_first(hass: HomeAssistant) -> None:
+    result = await _start_user_flow(hass)
 
-    @pytest.mark.asyncio
-    async def test_shows_form_on_first_call(self) -> None:
-        """First call with no input should show form."""
-        hass = MagicMock(spec=HomeAssistant)
-        flow = _make_flow(hass)
-        result = await flow.async_step_user(user_input=None)
-
-        assert result["type"] == FlowResultType.FORM
-        assert result["step_id"] == "user"
-        assert result["errors"] == {}
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert result["errors"] == {}
 
 
-# ---------------------------------------------------------------------------
-# async_step_user – login path
-# ---------------------------------------------------------------------------
+async def test_login_success_offers_the_sim_list(hass: HomeAssistant) -> None:
+    client = _mock_client()
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "select_sim"
+    assert list(result["data_schema"].schema["sim"].container) == [
+        MOCK_SIM.display_name
+    ]
 
 
-class TestUserStepLogin:
-    """Tests for the login authentication path."""
+async def test_selecting_a_sim_creates_the_entry(hass: HomeAssistant) -> None:
+    client = _mock_client()
 
-    @pytest.mark.asyncio
-    async def test_login_success_with_plans(self) -> None:
-        """Successful login that finds plans goes to select_plan."""
-        hass = MagicMock(spec=HomeAssistant)
-        flow = _make_flow(hass)
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"sim": MOCK_SIM.display_name}
+        )
 
-        mock_client = AsyncMock()
-        mock_client.async_login.return_value = ("cookie=abc", "xsrf-tok")
-        mock_client.async_fetch_dashboard_ids.return_value = [
-            {
-                "sim_plan_id": "sp-1",
-                "order_detail_id": "od-1",
-                "name": "07700900000",
-                "sim_number": "07700900000",
-            }
-        ]
-
-        with (
-            patch("custom_components.mozillion.config_flow.async_get_clientsession"),
-            patch(
-                "custom_components.mozillion.config_flow.MozillionClient",
-                return_value=mock_client,
-            ),
-        ):
-            result = await flow.async_step_user(_user_input_login())
-
-        # Should proceed to select_plan form
-        assert result["type"] == FlowResultType.FORM
-        assert result["step_id"] == "select_plan"
-
-    @pytest.mark.asyncio
-    async def test_login_success_no_plans_goes_to_manual(self) -> None:
-        """Successful login with no plans goes to manual_ids."""
-        hass = MagicMock(spec=HomeAssistant)
-        flow = _make_flow(hass)
-
-        mock_client = AsyncMock()
-        mock_client.async_login.return_value = ("cookie=abc", "xsrf-tok")
-        mock_client.async_fetch_dashboard_ids.return_value = []
-
-        with (
-            patch("custom_components.mozillion.config_flow.async_get_clientsession"),
-            patch(
-                "custom_components.mozillion.config_flow.MozillionClient",
-                return_value=mock_client,
-            ),
-        ):
-            result = await flow.async_step_user(_user_input_login())
-
-        assert result["type"] == FlowResultType.FORM
-        assert result["step_id"] == "manual_ids"
-
-    @pytest.mark.asyncio
-    async def test_login_failure_shows_error(self) -> None:
-        """Failed login shows error on the form."""
-        hass = MagicMock(spec=HomeAssistant)
-        flow = _make_flow(hass)
-
-        mock_client = AsyncMock()
-        mock_client.async_login.side_effect = RuntimeError("Bad credentials")
-
-        with (
-            patch("custom_components.mozillion.config_flow.async_get_clientsession"),
-            patch(
-                "custom_components.mozillion.config_flow.MozillionClient",
-                return_value=mock_client,
-            ),
-        ):
-            result = await flow.async_step_user(_user_input_login())
-
-        assert result["type"] == FlowResultType.FORM
-        assert result["step_id"] == "user"
-        # Login failed → no cookie → flow reports missing_auth
-        assert result["errors"]["base"] in ("cannot_connect", "missing_auth")
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["title"] == MOCK_SIM.display_name
+    data = result["data"]
+    assert data[CONF_SIM_META_ID] == "21919"
+    assert data[CONF_ORDER_DETAIL_ID] == "59835"
+    assert data[CONF_SIM_NUMBER] == "07700900000"
+    assert data[CONF_ICCID] == "89443042334117134260"
+    # The refreshed session must be stored, not the input cookie.
+    assert data[CONF_SESSION_COOKIE] == "mozillion_session=abc; XSRF-TOKEN=xyz"
+    assert data[CONF_SCAN_INTERVAL] == DEFAULT_SCAN_INTERVAL
 
 
-# ---------------------------------------------------------------------------
-# async_step_user – cookie path
-# ---------------------------------------------------------------------------
+async def test_entry_is_unique_per_sim(hass: HomeAssistant) -> None:
+    """Configuring the same SIM twice must abort, not duplicate."""
+    client = _mock_client()
+
+    with patch(CLIENT, return_value=client):
+        first = await _start_user_flow(hass)
+        first = await hass.config_entries.flow.async_configure(
+            first["flow_id"], _login_input()
+        )
+        await hass.config_entries.flow.async_configure(
+            first["flow_id"], {"sim": MOCK_SIM.display_name}
+        )
+
+        second = await _start_user_flow(hass)
+        second = await hass.config_entries.flow.async_configure(
+            second["flow_id"], _login_input()
+        )
+        second = await hass.config_entries.flow.async_configure(
+            second["flow_id"], {"sim": MOCK_SIM.display_name}
+        )
+
+    assert second["type"] == data_entry_flow.FlowResultType.ABORT
+    assert second["reason"] == "already_configured"
 
 
-class TestUserStepCookie:
-    """Tests for the cookie authentication path."""
+async def test_failed_login_shows_cannot_connect(hass: HomeAssistant) -> None:
+    client = _mock_client(login_error=MozillionAuthError("bad password"))
 
-    @pytest.mark.asyncio
-    async def test_cookie_auth_goes_to_manual_ids(self) -> None:
-        """Cookie auth (no email/password) goes to manual_ids."""
-        hass = MagicMock(spec=HomeAssistant)
-        flow = _make_flow(hass)
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
 
-        mock_client = AsyncMock()
-        mock_client.async_fetch_dashboard_ids.return_value = []
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert result["errors"]["base"] == "cannot_connect"
 
-        with (
-            patch("custom_components.mozillion.config_flow.async_get_clientsession"),
-            patch(
-                "custom_components.mozillion.config_flow.MozillionClient",
-                return_value=mock_client,
-            ),
-        ):
-            result = await flow.async_step_user(_user_input_cookie())
 
-        assert result["type"] == FlowResultType.FORM
-        assert result["step_id"] == "manual_ids"
+async def test_no_credentials_and_no_cookie_shows_missing_auth(
+    hass: HomeAssistant,
+) -> None:
+    client = _mock_client()
 
-    @pytest.mark.asyncio
-    async def test_no_auth_at_all_shows_error(self) -> None:
-        """No cookie and no login creds shows missing_auth error."""
-        hass = MagicMock(spec=HomeAssistant)
-        flow = _make_flow(hass)
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            _login_input(**{CONF_EMAIL: "", CONF_PASSWORD: ""}),
+        )
 
-        with (
-            patch("custom_components.mozillion.config_flow.async_get_clientsession"),
-            patch(
-                "custom_components.mozillion.config_flow.MozillionClient",
-                return_value=AsyncMock(),
-            ),
-        ):
-            result = await flow.async_step_user(
-                _user_input_login(
-                    **{CONF_EMAIL: "", CONF_PASSWORD: "", CONF_SESSION_COOKIE: ""}
-                )
-            )
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert result["errors"]["base"] == "missing_auth"
 
-        assert result["type"] == FlowResultType.FORM
-        assert result["errors"]["base"] == "missing_auth"
+
+async def test_unreadable_sim_list_falls_back_to_manual_ids(
+    hass: HomeAssistant,
+) -> None:
+    client = _mock_client(sims=[])
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "manual_ids"
 
 
 # ---------------------------------------------------------------------------
@@ -238,135 +234,113 @@ class TestUserStepCookie:
 # ---------------------------------------------------------------------------
 
 
-class TestManualIdsStep:
-    """Tests for the manual ID entry step."""
+async def test_manual_ids_creates_the_entry(hass: HomeAssistant) -> None:
+    client = _mock_client(sims=[])
 
-    @pytest.mark.asyncio
-    async def test_shows_form_on_first_call(self) -> None:
-        """First call shows the manual IDs form."""
-        hass = MagicMock(spec=HomeAssistant)
-        flow = _make_flow(hass)
-        flow._credentials = _user_input_cookie()
-        flow._cookie_header = "cookie=abc"
-        flow._xsrf_token = "xsrf-tok"
-
-        result = await flow.async_step_manual_ids(user_input=None)
-        assert result["type"] == FlowResultType.FORM
-        assert result["step_id"] == "manual_ids"
-
-    @pytest.mark.asyncio
-    async def test_valid_ids_creates_entry(self) -> None:
-        """Valid IDs with successful validation creates entry."""
-        hass = MagicMock(spec=HomeAssistant)
-        flow = _make_flow(hass)
-        flow._credentials = _user_input_cookie()
-        flow._cookie_header = "cookie=abc"
-        flow._xsrf_token = "xsrf-tok"
-        flow.async_set_unique_id = AsyncMock()
-        flow._abort_if_unique_id_configured = MagicMock()
-        flow.async_create_entry = MagicMock(
-            return_value={"type": FlowResultType.CREATE_ENTRY}
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _cookie_input()
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_ORDER_DETAIL_ID: "59835",
+                CONF_SIM_META_ID: "21919",
+                CONF_SIM_NUMBER: "07700900000",
+            },
         )
 
-        with patch(
-            "custom_components.mozillion.config_flow._validate_input",
-            new_callable=AsyncMock,
-        ) as mock_validate:
-            mock_validate.return_value = {}
-            result = await flow.async_step_manual_ids(
-                {
-                    CONF_ORDER_DETAIL_ID: "order-1",
-                    CONF_SIM_PLAN_ID: "sim-1",
-                    CONF_SIM_NUMBER: "07700900000",
-                }
-            )
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_SIM_META_ID] == "21919"
+    assert result["title"] == "Mozillion 07700900000"
 
-        assert result["type"] == FlowResultType.CREATE_ENTRY
 
-    @pytest.mark.asyncio
-    async def test_validation_failure_shows_error(self) -> None:
-        """Validation failure shows error."""
-        hass = MagicMock(spec=HomeAssistant)
-        flow = _make_flow(hass)
-        flow._credentials = _user_input_cookie()
-        flow._cookie_header = "cookie=abc"
-        flow._xsrf_token = "xsrf-tok"
+async def test_manual_ids_are_validated_against_the_api(
+    hass: HomeAssistant,
+) -> None:
+    client = _mock_client(sims=[], usage_error=RuntimeError("Unknown SIM"))
 
-        with patch(
-            "custom_components.mozillion.config_flow._validate_input",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("API down"),
-        ):
-            result = await flow.async_step_manual_ids(
-                {
-                    CONF_ORDER_DETAIL_ID: "order-1",
-                    CONF_SIM_PLAN_ID: "sim-1",
-                    CONF_SIM_NUMBER: "",
-                }
-            )
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _cookie_input()
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_ORDER_DETAIL_ID: "59835",
+                CONF_SIM_META_ID: "21919",
+                CONF_SIM_NUMBER: "",
+            },
+        )
 
-        assert result["type"] == FlowResultType.FORM
-        assert result["errors"]["base"] == "cannot_connect"
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "manual_ids"
+    assert result["errors"]["base"] == "cannot_connect"
 
 
 # ---------------------------------------------------------------------------
-# async_step_select_plan
+# async_step_reauth
 # ---------------------------------------------------------------------------
 
 
-class TestSelectPlanStep:
-    """Tests for the plan selection step."""
+async def test_reauth_updates_the_stored_session(hass: HomeAssistant) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Mozillion 07700900000",
+        data={**MOCK_ENTRY_DATA_COOKIE, CONF_SESSION_COOKIE: "stale=1"},
+        unique_id="21919",
+        version=2,
+    )
+    entry.add_to_hass(hass)
+    client = _mock_client()
 
-    @pytest.mark.asyncio
-    async def test_shows_plan_dropdown(self) -> None:
-        """Shows dropdown with available plans."""
-        hass = MagicMock(spec=HomeAssistant)
-        flow = _make_flow(hass)
-        flow._plans = [
-            {
-                "sim_plan_id": "sp-1",
-                "order_detail_id": "od-1",
-                "name": "07700900000",
-                "sim_number": "07700900000",
-            }
-        ]
+    with patch(CLIENT, return_value=client):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_REAUTH,
+                "entry_id": entry.entry_id,
+            },
+        )
+        assert result["step_id"] == "reauth_confirm"
 
-        result = await flow.async_step_select_plan(user_input=None)
-        assert result["type"] == FlowResultType.FORM
-        assert result["step_id"] == "select_plan"
-
-    @pytest.mark.asyncio
-    async def test_selecting_plan_creates_entry(self) -> None:
-        """Selecting a valid plan creates an entry."""
-        hass = MagicMock(spec=HomeAssistant)
-        flow = _make_flow(hass)
-        flow._credentials = _user_input_login()
-        flow._cookie_header = "cookie=abc"
-        flow._xsrf_token = "xsrf-tok"
-        flow._plans = [
-            {
-                "sim_plan_id": "sp-1",
-                "order_detail_id": "od-1",
-                "name": "07700900000",
-                "sim_number": "07700900000",
-            }
-        ]
-        flow.async_set_unique_id = AsyncMock()
-        flow._abort_if_unique_id_configured = MagicMock()
-        flow.async_create_entry = MagicMock(
-            return_value={"type": FlowResultType.CREATE_ENTRY}
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _credentials_only(_cookie_input())
         )
 
-        with patch(
-            "custom_components.mozillion.config_flow._validate_input",
-            new_callable=AsyncMock,
-            return_value={},
-        ):
-            result = await flow.async_step_select_plan(
-                {"plan": "07700900000 (SIM: sp-1)"}
-            )
+    assert result["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
 
-        assert result["type"] == FlowResultType.CREATE_ENTRY
+
+async def test_reauth_rejects_a_failed_login(hass: HomeAssistant) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Mozillion",
+        data=dict(MOCK_ENTRY_DATA_COOKIE),
+        unique_id="21919",
+        version=2,
+    )
+    entry.add_to_hass(hass)
+    client = _mock_client(login_error=MozillionAuthError("bad"))
+
+    with patch(CLIENT, return_value=client):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_REAUTH,
+                "entry_id": entry.entry_id,
+            },
+        )
+        assert result["step_id"] == "reauth_confirm"
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _credentials_only(_login_input())
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["errors"]["base"] == "cannot_connect"
 
 
 # ---------------------------------------------------------------------------
@@ -374,39 +348,105 @@ class TestSelectPlanStep:
 # ---------------------------------------------------------------------------
 
 
-class TestOptionsFlow:
-    """Tests for the options flow handler."""
+async def test_options_flow_updates_scan_interval(hass: HomeAssistant) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Mozillion",
+        data=dict(MOCK_ENTRY_DATA_COOKIE),
+        unique_id="21919",
+        version=2,
+    )
+    entry.add_to_hass(hass)
 
-    @pytest.mark.asyncio
-    async def test_shows_form_on_first_call(self) -> None:
-        """Shows options form with current values."""
-        handler = MozillionOptionsFlowHandler()
-        entry = MagicMock()
-        entry.options = {CONF_SCAN_INTERVAL: 3600}
-        entry.data = {CONF_USAGE_KEY: "usedData", CONF_REMAINING_KEY: "totalData"}
-        # Patch at the class level to bypass HA's deprecation guard
-        with patch.object(
-            type(handler),
-            "config_entry",
-            new_callable=lambda: property(lambda self: entry),
-        ):
-            result = await handler.async_step_init(user_input=None)
-        assert result["type"] == FlowResultType.FORM
-        assert result["step_id"] == "init"
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "init"
 
-    @pytest.mark.asyncio
-    async def test_updates_options(self) -> None:
-        """Submitting options creates entry."""
-        handler = MozillionOptionsFlowHandler()
-        handler.async_create_entry = MagicMock(
-            return_value={"type": FlowResultType.CREATE_ENTRY}
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_SCAN_INTERVAL: 7200}
+    )
+
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["data"] == {CONF_SCAN_INTERVAL: 7200}
+
+
+# ---------------------------------------------------------------------------
+# async_step_reconfigure
+# ---------------------------------------------------------------------------
+
+
+async def test_reconfigure_switches_to_another_sim(hass: HomeAssistant) -> None:
+    """Reconfiguring must update the entry in place, not create a second one."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Mozillion 07700900000",
+        data=dict(MOCK_ENTRY_DATA_COOKIE),
+        unique_id="21919",
+        version=2,
+    )
+    entry.add_to_hass(hass)
+
+    other = MozillionSim(
+        sim_meta_id="55555",
+        order_detail_id="11111",
+        sim_number="07700000001",
+        plan_data_tariff="50GB",
+    )
+    client = _mock_client(sims=[MOCK_SIM, other])
+
+    with patch(CLIENT, return_value=client):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_RECONFIGURE,
+                "entry_id": entry.entry_id,
+            },
+        )
+        assert result["type"] == data_entry_flow.FlowResultType.FORM
+        assert result["step_id"] == "reconfigure_confirm"
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _credentials_only(_cookie_input())
+        )
+        assert result["step_id"] == "select_sim"
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"sim": other.display_name}
         )
 
-        result = await handler.async_step_init(
-            {
-                CONF_SCAN_INTERVAL: 7200,
-                CONF_USAGE_KEY: "data.used",
-                CONF_REMAINING_KEY: "data.total",
-            }
+    assert result["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+
+    assert entry.data[CONF_SIM_META_ID] == "55555"
+    assert entry.data[CONF_ORDER_DETAIL_ID] == "11111"
+    assert entry.unique_id == "55555"
+    assert entry.title == "07700000001 (50GB)"
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+async def test_reconfigure_rejects_a_failed_login(hass: HomeAssistant) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Mozillion",
+        data=dict(MOCK_ENTRY_DATA_COOKIE),
+        unique_id="21919",
+        version=2,
+    )
+    entry.add_to_hass(hass)
+    client = _mock_client(login_error=MozillionAuthError("bad"))
+
+    with patch(CLIENT, return_value=client):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_RECONFIGURE,
+                "entry_id": entry.entry_id,
+            },
         )
-        assert result["type"] == FlowResultType.CREATE_ENTRY
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _credentials_only(_login_input())
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "reconfigure_confirm"
+    assert result["errors"]["base"] == "cannot_connect"
