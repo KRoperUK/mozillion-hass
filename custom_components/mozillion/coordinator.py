@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Coroutine
 from datetime import timedelta
-from typing import Any
+from typing import Any, TypeVar
 
 from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntry
@@ -13,12 +14,22 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import MozillionAuthError, MozillionClient
+from .api import MozillionAuthError, MozillionClient, MozillionSim, parse_reset_date
 from .const import (
+    ATTR_DAYS_LEFT,
     ATTR_ICCID,
+    ATTR_OVERSPEND_LIMIT_REACHED,
+    ATTR_PLAN_DURATION,
+    ATTR_PLAN_IS_DATA_ONLY,
+    ATTR_PLAN_ROAMING,
+    ATTR_PLAN_TARIFF,
+    ATTR_PLAN_TEXTS,
     ATTR_RAW,
     ATTR_REMAINING,
+    ATTR_RESET_DATE,
+    ATTR_RESET_LABEL,
     ATTR_SIM_NUMBER,
+    ATTR_SIM_STATUS,
     ATTR_TOTAL,
     ATTR_TOTAL_GBR,
     ATTR_TOTAL_GLOBAL,
@@ -27,6 +38,9 @@ from .const import (
     ATTR_USAGE_GBR,
     ATTR_USAGE_GLOBAL,
     ATTR_USAGE_PERCENTAGE,
+    ATTR_WALLET,
+    ATTR_WALLET_BALANCE,
+    ATTR_WALLET_SPEND,
     AUTH_REFRESH_THRESHOLD,
     CONF_EMAIL,
     CONF_ICCID,
@@ -44,6 +58,8 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 CoordinatorData = dict[str, Any]
+
+_T = TypeVar("_T")
 
 
 def _to_float(value: Any) -> float | None:
@@ -148,6 +164,58 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             xsrf_token=self.xsrf_header,
         )
 
+    async def _async_fetch_sim(self) -> MozillionSim:
+        """Read the plan/reset/status detail for this SIM from the dashboard."""
+
+        return await self.client.async_fetch_sim(
+            sim_meta_id=self.config_entry.data[CONF_SIM_META_ID],
+            cookie_header=self.cookie_header or "",
+            xsrf_token=self.xsrf_header,
+        )
+
+    async def _async_fetch_wallet(self) -> dict[str, Any]:
+        """Read the out-of-bundle wallet position for this order."""
+
+        return await self.client.async_fetch_overspend(
+            order_detail_id=self.config_entry.data[CONF_ORDER_DETAIL_ID],
+            cookie_header=self.cookie_header or "",
+            xsrf_token=self.xsrf_header,
+        )
+
+    async def _async_read_optional(
+        self, what: str, coro: Coroutine[Any, Any, _T]
+    ) -> _T | None:
+        """Read something the integration can live without.
+
+        Usage is this integration's job; the plan blurb and the wallet position
+        are extras. If Mozillion changes that markup we would rather lose the
+        extras than lose data usage entirely, so a non-auth failure here is
+        logged and skipped. An expired session still propagates, because that
+        needs the reauth flow rather than a silent downgrade.
+        """
+
+        try:
+            return await coro
+        except MozillionAuthError:
+            raise
+        except (RuntimeError, ClientError) as err:
+            _LOGGER.warning("Could not read %s from Mozillion: %s", what, err)
+            return None
+
+    async def _async_read_all(
+        self,
+    ) -> tuple[dict[str, Any], MozillionSim | None, dict[str, Any] | None]:
+        """Read usage, then the extras that are allowed to fail."""
+
+        raw = await self._async_fetch_usage()
+        sim = await self._async_read_optional(
+            "the SIM details", self._async_fetch_sim()
+        )
+        wallet = await self._async_read_optional(
+            "the wallet balance", self._async_fetch_wallet()
+        )
+        return raw, sim, wallet
+
     async def _async_update_data(self) -> CoordinatorData:
         """Fetch data from API, transparently re-authenticating on expiry."""
 
@@ -162,31 +230,34 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     "obtain one. Please reconfigure the integration."
                 )
 
-            raw = await self._async_fetch_usage()
+            raw, sim, wallet = await self._async_read_all()
         except MozillionAuthError as err:
-            raw = await self._async_retry_after_auth_error(err)
+            raw, sim, wallet = await self._async_retry_after_auth_error(err)
         except (RuntimeError, ClientError) as err:
             _LOGGER.error("Update failed: %s", err)
             raise UpdateFailed(err) from err
 
-        data = _build_coordinator_data(raw)
+        data = _build_coordinator_data(raw, sim=sim, wallet=wallet)
         data[ATTR_SIM_NUMBER] = self.config_entry.data.get(CONF_SIM_NUMBER, "")
         data[ATTR_ICCID] = self.config_entry.data.get(CONF_ICCID, "")
 
         _LOGGER.debug(
             "Update success: usage=%s, total=%s, remaining=%s, "
-            "percentage=%s, unlimited=%s",
+            "percentage=%s, unlimited=%s, status=%s, reset=%s, wallet=%s",
             data[ATTR_USAGE],
             data[ATTR_TOTAL],
             data[ATTR_REMAINING],
             data[ATTR_USAGE_PERCENTAGE],
             data[ATTR_UNLIMITED],
+            data[ATTR_SIM_STATUS],
+            data[ATTR_RESET_DATE],
+            data[ATTR_WALLET],
         )
         return data
 
     async def _async_retry_after_auth_error(
         self, error: MozillionAuthError
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], MozillionSim | None, dict[str, Any] | None]:
         """Re-authenticate once after a rejected session, then retry the fetch.
 
         Only entries with credentials can recover; a cookie-only entry has to
@@ -207,7 +278,7 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 raise UpdateFailed(
                     "Re-authentication failed to obtain a session"
                 ) from None
-            return await self._async_fetch_usage()
+            return await self._async_read_all()
         except MozillionAuthError as retry_error:
             # The credentials themselves are wrong: a retry will not help, so
             # ask the user instead of looping.
@@ -218,12 +289,17 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             raise UpdateFailed(retry_error) from retry_error
 
 
-def _build_coordinator_data(raw: dict[str, Any]) -> CoordinatorData:
-    """Turn a completed usage payload into coordinator data.
+def _build_coordinator_data(
+    raw: dict[str, Any],
+    sim: MozillionSim | None = None,
+    wallet: dict[str, Any] | None = None,
+) -> CoordinatorData:
+    """Turn the Mozillion payloads into coordinator data.
 
     ``usedData``/``totalData`` are what the dashboard itself renders, so they
     drive the primary sensors. The GBR and global buckets are carried through
-    as diagnostics -- they are unverified (see the integration docs).
+    as diagnostics -- they are unverified (see the integration docs). ``sim``
+    and ``wallet`` are optional: the integration keeps working without them.
     """
 
     usage = _to_float(raw.get("usedData"))
@@ -238,7 +314,7 @@ def _build_coordinator_data(raw: dict[str, Any]) -> CoordinatorData:
         remaining = max(0.0, total - usage)
         usage_percentage = min(100.0, (usage / total) * 100)
 
-    return {
+    data: CoordinatorData = {
         ATTR_RAW: raw,
         ATTR_USAGE: usage,
         ATTR_TOTAL: total,
@@ -249,4 +325,57 @@ def _build_coordinator_data(raw: dict[str, Any]) -> CoordinatorData:
         ATTR_TOTAL_GBR: _to_float(raw.get("totalDataGbr")),
         ATTR_USAGE_GLOBAL: _to_float(raw.get("usedDataGlobal")),
         ATTR_TOTAL_GLOBAL: _to_float(raw.get("totalDataGlobal")),
+        ATTR_SIM_STATUS: "",
+        ATTR_RESET_DATE: None,
+        ATTR_RESET_LABEL: "",
+        ATTR_DAYS_LEFT: "",
+        ATTR_PLAN_TARIFF: "",
+        ATTR_PLAN_DURATION: "",
+        ATTR_PLAN_ROAMING: "",
+        ATTR_PLAN_TEXTS: "",
+        ATTR_PLAN_IS_DATA_ONLY: False,
+        ATTR_WALLET: None,
+        ATTR_WALLET_BALANCE: None,
+        ATTR_WALLET_SPEND: None,
+        ATTR_OVERSPEND_LIMIT_REACHED: None,
     }
+
+    if sim is not None:
+        data[ATTR_SIM_STATUS] = sim.status
+        data[ATTR_RESET_LABEL] = sim.reset_label
+        data[ATTR_DAYS_LEFT] = sim.days_left
+        data[ATTR_RESET_DATE] = parse_reset_date(sim.reset_label, sim.days_left)
+        data[ATTR_PLAN_TARIFF] = sim.plan_data_tariff
+        data[ATTR_PLAN_DURATION] = sim.plan_duration
+        data[ATTR_PLAN_ROAMING] = sim.plan_roaming
+        data[ATTR_PLAN_TEXTS] = sim.plan_texts_minutes
+        data[ATTR_PLAN_IS_DATA_ONLY] = sim.plan_is_data_only
+
+    if wallet is not None:
+        data[ATTR_WALLET] = wallet
+        # `remaining` is the figure mozillion.com displays as "Your balance";
+        # `balance` is carried through untouched inside ATTR_WALLET.
+        data[ATTR_WALLET_BALANCE] = _to_float(wallet.get("remaining"))
+        data[ATTR_WALLET_SPEND] = _to_float(wallet.get("spent"))
+        data[ATTR_OVERSPEND_LIMIT_REACHED] = bool(wallet.get("reached"))
+
+    return data
+
+
+def wallet_is_active(data: CoordinatorData) -> bool:
+    """Return True when the out-of-bundle wallet is worth reporting.
+
+    Mozillion hides the wallet behind a "top up to start using these features"
+    prompt until the SIM has top-up history or a positive balance, and a
+    never-topped-up wallet answers all zeros with ``reached: true`` -- which
+    would read as "you have hit your limit" when the truth is "you have no
+    wallet". The entities use this to report unavailable instead.
+    """
+
+    if data.get(ATTR_WALLET) is None:
+        return False
+    balance = data.get(ATTR_WALLET_BALANCE)
+    spend = data.get(ATTR_WALLET_SPEND)
+    return bool(
+        (balance is not None and balance > 0) or (spend is not None and spend > 0)
+    )

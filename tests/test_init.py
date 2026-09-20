@@ -10,9 +10,15 @@ from custom_components.mozillion.const import ATTR_USAGE, DOMAIN
 from custom_components.mozillion.coordinator import MozillionCoordinator
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, State
+from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from tests.conftest import MOCK_API_RESPONSE, MOCK_ENTRY_DATA_COOKIE
+from tests.conftest import (
+    MOCK_API_RESPONSE,
+    MOCK_ENTRY_DATA_COOKIE,
+    MOCK_SIM,
+    MOCK_WALLET,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -43,6 +49,8 @@ def _client(**overrides) -> MagicMock:
         return_value=("mozillion_session=abc; XSRF-TOKEN=xyz", "xyz")
     )
     client.async_fetch_sims = AsyncMock(return_value=[])
+    client.async_fetch_sim = AsyncMock(return_value=MOCK_SIM)
+    client.async_fetch_overspend = AsyncMock(return_value=MOCK_WALLET)
     for key, value in overrides.items():
         setattr(client, key, value)
     return client
@@ -78,15 +86,35 @@ async def test_setup_creates_the_expected_entities(hass: HomeAssistant) -> None:
     assert entry.state is ConfigEntryState.LOADED
     assert entry.runtime_data.coordinator.data[ATTR_USAGE] == 3.5
 
-    assert sorted(_sensors(hass).values()) == ["10.0", "3.5", "35.0", "6.5"]
     assert _sensor_ending(hass, "_usage").state == "3.5"
+    assert _sensor_ending(hass, "_total").state == "10.0"
     assert _sensor_ending(hass, "_remaining").state == "6.5"
+    assert _sensor_ending(hass, "_usage_percentage").state == "35.0"
+    # The dashboard-derived extras.
+    assert _sensor_ending(hass, "_data_resets").state == "2026-10-19"
+    assert _sensor_ending(hass, "_wallet_balance").state == "9.5"
+    assert _sensor_ending(hass, "_out_of_bundle_spend").state == "2.5"
+    assert _sensor_ending(hass, "_sim_status").state == "ACTIVE"
 
     binary = [
         state for state in hass.states.async_all() if state.domain == "binary_sensor"
     ]
-    assert len(binary) == 1
-    assert binary[0].state == "off"
+    assert sorted(state.state for state in binary) == ["off", "off"]
+
+
+async def test_device_carries_the_plan_as_its_model(hass: HomeAssistant) -> None:
+    entry = _entry(hass)
+
+    with patch(CLIENT, return_value=_client()):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    registry = dr.async_get(hass)
+    devices = dr.async_entries_for_config_entry(registry, entry.entry_id)
+    assert len(devices) == 1
+    assert devices[0].model == "10GB"
+    assert devices[0].serial_number == "89440000000000000000"
+    assert (DOMAIN, "7654321") in devices[0].identifiers
 
 
 async def test_entities_carry_the_raw_payload(hass: HomeAssistant) -> None:

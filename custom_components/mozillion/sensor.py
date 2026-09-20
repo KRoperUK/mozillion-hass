@@ -15,13 +15,23 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfInformation
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    ATTR_DAYS_LEFT,
     ATTR_ICCID,
+    ATTR_PLAN_DURATION,
+    ATTR_PLAN_IS_DATA_ONLY,
+    ATTR_PLAN_ROAMING,
+    ATTR_PLAN_TARIFF,
+    ATTR_PLAN_TEXTS,
     ATTR_RAW,
     ATTR_REMAINING,
+    ATTR_RESET_DATE,
+    ATTR_RESET_LABEL,
     ATTR_SIM_NUMBER,
+    ATTR_SIM_STATUS,
     ATTR_TOTAL,
     ATTR_TOTAL_GBR,
     ATTR_TOTAL_GLOBAL,
@@ -30,13 +40,20 @@ from .const import (
     ATTR_USAGE_GBR,
     ATTR_USAGE_GLOBAL,
     ATTR_USAGE_PERCENTAGE,
+    ATTR_WALLET,
+    ATTR_WALLET_BALANCE,
+    ATTR_WALLET_SPEND,
 )
-from .coordinator import MozillionCoordinator
+from .coordinator import MozillionCoordinator, wallet_is_active
 from .entity import MozillionEntity
 
 # Mozillion reports separate UK ("Gbr") and roaming ("Global") buckets alongside
 # the headline figure. Which one the headline tracks is unverified, so the
 # buckets are exposed as attributes rather than entities of their own.
+#
+# The wallet figures come from the dashboard's overspend endpoint. A SIM with no
+# wallet answers all zeros, so those entities report unavailable unless the
+# wallet is actually in use (see `wallet_is_active`).
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -44,6 +61,8 @@ class MozillionSensorEntityDescription(SensorEntityDescription):
     """Describe a Mozillion sensor."""
 
     value_fn: Callable[[dict[str, Any]], Any]
+    # Extra guard for entities that are only meaningful in some states.
+    available_fn: Callable[[dict[str, Any]], bool] | None = None
 
 
 DATA_SENSORS: tuple[MozillionSensorEntityDescription, ...] = (
@@ -82,6 +101,38 @@ DATA_SENSORS: tuple[MozillionSensorEntityDescription, ...] = (
             else None
         ),
     ),
+    MozillionSensorEntityDescription(
+        key=ATTR_RESET_DATE,
+        translation_key="reset_date",
+        device_class=SensorDeviceClass.DATE,
+        value_fn=lambda data: data.get(ATTR_RESET_DATE),
+    ),
+    MozillionSensorEntityDescription(
+        key=ATTR_WALLET_BALANCE,
+        translation_key="wallet_balance",
+        device_class=SensorDeviceClass.MONETARY,
+        native_unit_of_measurement="GBP",
+        state_class=SensorStateClass.TOTAL,
+        value_fn=lambda data: data.get(ATTR_WALLET_BALANCE),
+        available_fn=wallet_is_active,
+    ),
+    MozillionSensorEntityDescription(
+        key=ATTR_WALLET_SPEND,
+        translation_key="wallet_spend",
+        device_class=SensorDeviceClass.MONETARY,
+        native_unit_of_measurement="GBP",
+        # Monetary readings only accept the TOTAL state class, and Mozillion's
+        # spend figure is a per-period total rather than a running meter.
+        state_class=SensorStateClass.TOTAL,
+        value_fn=lambda data: data.get(ATTR_WALLET_SPEND),
+        available_fn=wallet_is_active,
+    ),
+    MozillionSensorEntityDescription(
+        key=ATTR_SIM_STATUS,
+        translation_key="sim_status",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: data.get(ATTR_SIM_STATUS) or None,
+    ),
 )
 
 
@@ -115,13 +166,22 @@ class MozillionSensor(MozillionEntity, SensorEntity):
         self.entity_description = description
 
     @property
+    def available(self) -> bool:
+        """Return False when this reading does not apply right now."""
+        if not super().available:
+            return False
+        if self.entity_description.available_fn is None:
+            return True
+        return self.entity_description.available_fn(self.coordinator.data)
+
+    @property
     def native_value(self) -> Any:
         """Return the sensor value."""
         return self.entity_description.value_fn(self.coordinator.data)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the raw payload plus the per-bucket usage breakdown."""
+        """Return the raw payloads plus the derived detail."""
 
         data = self.coordinator.data
         return {
@@ -133,4 +193,12 @@ class MozillionSensor(MozillionEntity, SensorEntity):
             ATTR_TOTAL_GBR: data.get(ATTR_TOTAL_GBR),
             ATTR_USAGE_GLOBAL: data.get(ATTR_USAGE_GLOBAL),
             ATTR_TOTAL_GLOBAL: data.get(ATTR_TOTAL_GLOBAL),
+            ATTR_RESET_LABEL: data.get(ATTR_RESET_LABEL),
+            ATTR_DAYS_LEFT: data.get(ATTR_DAYS_LEFT),
+            ATTR_PLAN_TARIFF: data.get(ATTR_PLAN_TARIFF),
+            ATTR_PLAN_DURATION: data.get(ATTR_PLAN_DURATION),
+            ATTR_PLAN_ROAMING: data.get(ATTR_PLAN_ROAMING),
+            ATTR_PLAN_TEXTS: data.get(ATTR_PLAN_TEXTS),
+            ATTR_PLAN_IS_DATA_ONLY: data.get(ATTR_PLAN_IS_DATA_ONLY),
+            ATTR_WALLET: data.get(ATTR_WALLET),
         }

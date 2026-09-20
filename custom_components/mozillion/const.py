@@ -10,6 +10,8 @@ TWO_FACTOR_PATH = "/2fa/verify"
 DASHBOARD_PATH = "/new-user-dashboard"
 DATA_USAGE_PATH = "/get-data-usage"
 DATA_USAGE_STATUS_PATH = "/get-data-usage-status"
+# Where the dashboard's own wallet button reads the overspend balance from.
+CHECK_BALANCE_PATH = "/overspend-limits/check-balance"
 
 CONF_ORDER_DETAIL_ID = "order_detail_id"
 CONF_SIM_META_ID = "sim_meta_id"
@@ -48,6 +50,23 @@ ATTR_USAGE_GBR = "usage_gbr"
 ATTR_TOTAL_GBR = "total_gbr"
 ATTR_USAGE_GLOBAL = "usage_global"
 ATTR_TOTAL_GLOBAL = "total_global"
+
+# From the dashboard's SIM markup.
+ATTR_SIM_STATUS = "sim_status"
+ATTR_RESET_DATE = "reset_date"
+ATTR_RESET_LABEL = "reset_label"
+ATTR_DAYS_LEFT = "days_left"
+ATTR_PLAN_TARIFF = "plan_tariff"
+ATTR_PLAN_DURATION = "plan_duration"
+ATTR_PLAN_ROAMING = "plan_roaming"
+ATTR_PLAN_TEXTS = "plan_texts_minutes"
+ATTR_PLAN_IS_DATA_ONLY = "plan_is_data_only"
+
+# From the overspend (wallet) endpoint.
+ATTR_WALLET = "wallet"
+ATTR_WALLET_BALANCE = "wallet_balance"
+ATTR_WALLET_SPEND = "wallet_spend"
+ATTR_OVERSPEND_LIMIT_REACHED = "overspend_limit_reached"
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
