@@ -31,13 +31,13 @@ test-all: test test-live
 
 # ── Linting & Formatting ───────────────────────────────
 lint:
-	ruff check custom_components/ tests/
+	ruff check custom_components/ scripts/ tests/
 
 format:
 	ruff format custom_components/ tests/
 
 check: lint
-	ruff format --check custom_components/ tests/
+	ruff format --check custom_components/ scripts/ tests/
 
 # ── Pre-commit ──────────────────────────────────────────
 pre-commit:
