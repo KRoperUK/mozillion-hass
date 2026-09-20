@@ -5,6 +5,24 @@
 
 * **coordinator:** transparently re-authenticate on expired sessions ([a3eafa2](https://github.com/KRoperUK/mozillion-hass/commit/a3eafa25900f4f5f93a5cfa9bd8b022e419f3798))
 
+## [1.0.0](https://github.com/KRoperUK/mozillion-hass/compare/v0.6.1...v1.0.0) (2026-09-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* entries written by the old contract are migrated on first start; the migration re-reads the SIM list to discover the sim_meta_id. The `usage_key`/`remaining_key` options are gone (the response fields are known now), and a SIM's unique id is its sim_meta_id rather than its order_detail_id.
+
+### Features
+
+* add Welsh, Irish and French translations ([#29](https://github.com/KRoperUK/mozillion-hass/issues/29)) ([cb53adb](https://github.com/KRoperUK/mozillion-hass/commit/cb53adb656e2c71567cd8c59eec216e35c21ec14))
+* repair the integration against Mozillion's sim_meta_id API ([#22](https://github.com/KRoperUK/mozillion-hass/issues/22)) ([44e5f1a](https://github.com/KRoperUK/mozillion-hass/commit/44e5f1a3f2a77ccf6873db5f1279c11c8f24b0d7))
+
+
+### Bug Fixes
+
+* **deps:** stop pinning homeassistant against the framework's own pin ([#17](https://github.com/KRoperUK/mozillion-hass/issues/17)) ([f231368](https://github.com/KRoperUK/mozillion-hass/commit/f23136857b265788f99abaf565bbf1de5505e36a))
+* renew an expired stored session when migrating a legacy entry ([#28](https://github.com/KRoperUK/mozillion-hass/issues/28)) ([8cbd590](https://github.com/KRoperUK/mozillion-hass/commit/8cbd59014a29f0e0a8af1cefa5887fddcbfbb729))
+
 ## [0.6.1](https://github.com/KRoperUK/mozillion-hass/compare/v0.6.0...v0.6.1) (2026-07-09)
 
 
