@@ -1,0 +1,97 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Mozillion",
+        "description": "Connectez-vous à Mozillion pour récupérer votre consommation de données.",
+        "data": {
+          "email": "Adresse e-mail",
+          "password": "Mot de passe",
+          "totp_secret": "Secret TOTP (Base32, facultatif)",
+          "origin": "En-tête Origin (facultatif)",
+          "session_cookie": "En-tête Cookie (facultatif si vous utilisez la connexion)",
+          "xsrf_token": "En-tête du jeton XSRF (facultatif)",
+          "scan_interval": "Intervalle d'interrogation (secondes)"
+        }
+      },
+      "select_sim": {
+        "title": "Sélectionner la SIM",
+        "description": "Choisissez la SIM à suivre.",
+        "data": {
+          "sim": "SIM"
+        }
+      },
+      "manual_ids": {
+        "title": "Saisir les identifiants manuellement",
+        "description": "Saisissez votre identifiant de commande et l'identifiant SIM (meta). Les deux figurent dans le sélecteur de SIM du tableau de bord Mozillion.",
+        "data": {
+          "order_detail_id": "Identifiant de commande",
+          "sim_meta_id": "Identifiant SIM (meta)",
+          "sim_number": "Numéro de SIM (facultatif)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Se réauthentifier auprès de Mozillion",
+        "description": "Votre session Mozillion a expiré. Fournissez de nouveaux identifiants ou un en-tête Cookie récent.",
+        "data": {
+          "email": "Adresse e-mail",
+          "password": "Mot de passe",
+          "totp_secret": "Secret TOTP (Base32, facultatif)",
+          "session_cookie": "En-tête Cookie (facultatif si vous utilisez la connexion)",
+          "xsrf_token": "En-tête du jeton XSRF (facultatif)"
+        }
+      },
+      "reconfigure_confirm": {
+        "title": "Reconfigurer Mozillion",
+        "description": "Mettez à jour les identifiants ou choisissez une autre SIM à suivre.",
+        "data": {
+          "email": "Adresse e-mail",
+          "password": "Mot de passe",
+          "totp_secret": "Secret TOTP (Base32, facultatif)",
+          "session_cookie": "En-tête Cookie (facultatif si vous utilisez la connexion)",
+          "xsrf_token": "En-tête du jeton XSRF (facultatif)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Connexion impossible. Vérifiez vos identifiants, l'en-tête Cookie et que la SIM est toujours associée à votre compte.",
+      "missing_auth": "Fournissez soit une adresse e-mail et un mot de passe (et éventuellement le TOTP), soit un en-tête Cookie."
+    },
+    "abort": {
+      "reauth_successful": "Réauthentification réussie.",
+      "already_configured": "Cette SIM est déjà configurée.",
+      "reconfigure_successful": "Reconfiguration réussie."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options Mozillion",
+        "data": {
+          "scan_interval": "Intervalle d'interrogation (secondes)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "usage": {
+        "name": "Données utilisées"
+      },
+      "total": {
+        "name": "Forfait total"
+      },
+      "remaining": {
+        "name": "Données restantes"
+      },
+      "usage_percentage": {
+        "name": "Pourcentage utilisé"
+      }
+    },
+    "binary_sensor": {
+      "unlimited": {
+        "name": "Illimité"
+      }
+    }
+  }
+}
