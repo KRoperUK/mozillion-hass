@@ -302,7 +302,13 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ig
 
         if self._reconfigure_entry is not None:
             # Reconfigure in place: the entry id, its entities and its history
-            # are all preserved.
+            # are all preserved. This flow also collects the ids a failed
+            # migration could not discover, so mark the entry as migrated --
+            # otherwise setup would try (and fail) to migrate all over again.
+            if self._reconfigure_entry.version != self.VERSION:
+                self.hass.config_entries.async_update_entry(
+                    self._reconfigure_entry, version=self.VERSION
+                )
             return self.async_update_reload_and_abort(
                 self._reconfigure_entry,
                 data=data,

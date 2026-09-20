@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from custom_components.mozillion import CONFIG_ENTRY_VERSION, async_migrate_entry
-from custom_components.mozillion.api import MozillionSim
+from custom_components.mozillion.api import MozillionAuthError, MozillionSim
 from custom_components.mozillion.const import (
     CONF_ICCID,
     CONF_ORDER_DETAIL_ID,
@@ -186,3 +186,108 @@ class TestMigrateToV2:
             assert await async_migrate_entry(hass, entry) is False
 
         client_cls.assert_not_called()
+
+
+class TestStaleStoredSession:
+    """The stored cookie is usually long expired by the time we migrate.
+
+    The integration was broken upstream for months, so a legacy entry's session
+    has almost certainly aged out. Migration must renew it from the stored
+    credentials instead of giving up -- this is the reported failure.
+    """
+
+    async def test_expired_cookie_falls_back_to_the_credentials(
+        self, hass: HomeAssistant
+    ) -> None:
+        entry = _legacy_entry(hass, **{CONF_SESSION_COOKIE: "expired=1"})
+
+        client = MagicMock()
+        client.async_login = AsyncMock(return_value=("fresh=1", "new-xsrf"))
+        client.async_fetch_sims = AsyncMock(
+            side_effect=[MozillionAuthError("login page"), [MOCK_SIM]]
+        )
+
+        with patch(CLIENT, return_value=client):
+            assert await async_migrate_entry(hass, entry) is True
+
+        client.async_login.assert_awaited_once()
+        assert entry.version == CONFIG_ENTRY_VERSION
+        assert entry.data[CONF_SIM_META_ID] == "21919"
+        # The refreshed session must be stored, not the expired one.
+        assert entry.data[CONF_SESSION_COOKIE] == "fresh=1"
+        assert entry.data[CONF_XSRF_TOKEN] == "new-xsrf"
+
+    async def test_expired_cookie_without_credentials_prompts_reconfigure(
+        self, hass: HomeAssistant
+    ) -> None:
+        """A cookie-only entry has no way to renew itself, so ask the user."""
+        entry = _legacy_entry(
+            hass,
+            **{
+                CONF_SESSION_COOKIE: "expired=1",
+                "email": "",
+                "password": "",
+            },
+        )
+
+        client = MagicMock()
+        client.async_login = AsyncMock()
+        client.async_fetch_sims = AsyncMock(
+            side_effect=MozillionAuthError("login page")
+        )
+
+        with patch(CLIENT, return_value=client):
+            assert await async_migrate_entry(hass, entry) is False
+
+        client.async_login.assert_not_called()
+        assert entry.version == 1
+
+        flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+        assert any(
+            flow["context"]["source"] == "reconfigure"
+            and flow["context"].get("entry_id") == entry.entry_id
+            for flow in flows
+        ), "the user was left with no way forward"
+
+    async def test_ambiguous_match_prompts_reconfigure(
+        self, hass: HomeAssistant
+    ) -> None:
+        other = MozillionSim(
+            sim_meta_id="55555",
+            order_detail_id="59835",
+            sim_number="07700000001",
+        )
+        entry = _legacy_entry(hass, **{CONF_SIM_NUMBER: "07000000000"})
+
+        client = MagicMock()
+        client.async_fetch_sims = AsyncMock(return_value=[other, MOCK_SIM])
+
+        with patch(CLIENT, return_value=client):
+            assert await async_migrate_entry(hass, entry) is False
+
+        flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+        assert any(flow["context"]["source"] == "reconfigure" for flow in flows)
+
+    async def test_no_duplicate_prompt_when_one_is_already_open(
+        self, hass: HomeAssistant
+    ) -> None:
+        """Retried setups must not stack reconfigure flows."""
+        entry = _legacy_entry(
+            hass,
+            **{CONF_SESSION_COOKIE: "expired=1", "email": "", "password": ""},
+        )
+        client = MagicMock()
+        client.async_fetch_sims = AsyncMock(
+            side_effect=MozillionAuthError("login page")
+        )
+
+        with patch(CLIENT, return_value=client):
+            assert await async_migrate_entry(hass, entry) is False
+            assert await async_migrate_entry(hass, entry) is False
+
+        flows = [
+            flow
+            for flow in hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+            if flow["context"].get("entry_id") == entry.entry_id
+        ]
+        assert len(flows) == 1

@@ -9,7 +9,7 @@ from typing import Any
 
 from homeassistant.components.binary_sensor import DOMAIN as BINARY_SENSOR_DOMAIN
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import SOURCE_RECONFIGURE, ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -28,6 +28,7 @@ from .const import (
     CONF_XSRF_TOKEN,
     DEFAULT_ORIGIN,
     DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
 )
 from .coordinator import CoordinatorData, MozillionCoordinator
 
@@ -133,28 +134,63 @@ async def _async_migrate_to_v2(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     cookie_header = data.get(CONF_SESSION_COOKIE) or ""
     xsrf_token = data.get(CONF_XSRF_TOKEN)
-    email = data.get(CONF_EMAIL)
-    password = data.get(CONF_PASSWORD)
+    # Coerced to str so the login closure below is typed rather than Any.
+    email = str(data.get(CONF_EMAIL) or "")
+    password = str(data.get(CONF_PASSWORD) or "")
+    can_log_in = bool(email and password)
 
-    try:
-        if not cookie_header and email and password:
-            cookie_header, xsrf_token = await client.async_login(
-                email=email,
-                password=password,
-                totp_secret=data.get(CONF_TOTP_SECRET) or None,
-                origin=data.get(CONF_ORIGIN, DEFAULT_ORIGIN),
-            )
+    async def log_in() -> None:
+        """Replace the stored session with a freshly authenticated one."""
+        nonlocal cookie_header, xsrf_token
+        cookie_header, xsrf_token = await client.async_login(
+            email=email,
+            password=password,
+            totp_secret=data.get(CONF_TOTP_SECRET) or None,
+            origin=data.get(CONF_ORIGIN, DEFAULT_ORIGIN),
+        )
+
+    async def read_sims() -> list[MozillionSim]:
+        """Read the SIM list, recovering from a stale stored session.
+
+        The stored cookie is very often long expired -- the integration was
+        broken upstream for months, so the session it holds has aged out. A
+        rejected cookie must fall back to the credentials rather than failing
+        the whole migration.
+        """
         if not cookie_header:
-            _LOGGER.error(
-                "Cannot migrate Mozillion entry %s: no usable credentials. "
-                "Reconfigure the integration.",
+            if not can_log_in:
+                raise MozillionAuthError("no stored session and no credentials")
+            await log_in()
+
+        try:
+            return await client.async_fetch_sims(
+                cookie_header=cookie_header, xsrf_token=xsrf_token
+            )
+        except MozillionAuthError:
+            if not can_log_in:
+                raise
+            _LOGGER.info(
+                "Stored Mozillion session for entry %s has expired; logging in "
+                "again before migrating",
                 entry.entry_id,
             )
-            return False
+            await log_in()
+            return await client.async_fetch_sims(
+                cookie_header=cookie_header, xsrf_token=xsrf_token
+            )
 
-        sims = await client.async_fetch_sims(
-            cookie_header=cookie_header, xsrf_token=xsrf_token
+    try:
+        sims = await read_sims()
+    except MozillionAuthError as err:
+        _LOGGER.error(
+            "Cannot migrate Mozillion entry %s: the stored session has expired "
+            "and there are no credentials to renew it (%s). Reconfigure the "
+            "integration with your email and password, or a fresh cookie.",
+            entry.entry_id,
+            err,
         )
+        await _async_prompt_reconfigure(hass, entry)
+        return False
     except RuntimeError as err:
         _LOGGER.error("Cannot migrate Mozillion entry %s: %s", entry.entry_id, err)
         return False
@@ -163,11 +199,13 @@ async def _async_migrate_to_v2(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if sim is None:
         _LOGGER.error(
             "Cannot migrate Mozillion entry %s: none of the %d SIM(s) on the "
-            "dashboard match the stored SIM number %r",
+            "dashboard match the stored SIM number %r. Reconfigure the "
+            "integration to pick the right SIM.",
             entry.entry_id,
             len(sims),
             data.get(CONF_SIM_NUMBER, ""),
         )
+        await _async_prompt_reconfigure(hass, entry)
         return False
 
     data[CONF_SIM_META_ID] = sim.sim_meta_id
@@ -196,6 +234,35 @@ async def _async_migrate_to_v2(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "Migrated Mozillion entry %s to SIM %s", entry.entry_id, sim.sim_meta_id
     )
     return True
+
+
+async def _async_prompt_reconfigure(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Ask the user to re-enter their details, since migration cannot proceed.
+
+    Migration returns ``False`` on failure, which only leaves a log line the user
+    never sees. Starting the reconfigure flow gives them a UI path back instead
+    of a silently dead entry -- the reconfigure step writes the same ids the
+    migration would have discovered.
+    """
+
+    try:
+        existing = hass.config_entries.flow.async_progress_by_handler(
+            DOMAIN, include_uninitialized=True
+        )
+        if any(flow["context"].get("entry_id") == entry.entry_id for flow in existing):
+            return
+        await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": SOURCE_RECONFIGURE,
+                "entry_id": entry.entry_id,
+            },
+        )
+    except Exception:
+        _LOGGER.exception(
+            "Could not start the Mozillion reconfigure flow for entry %s",
+            entry.entry_id,
+        )
 
 
 def _select_sim_for_migration(
