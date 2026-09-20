@@ -2,38 +2,52 @@
 
 DOMAIN = "mozillion"
 PLATFORMS = ["sensor", "binary_sensor"]
-DEFAULT_BASE_URL = "https://www.mozillion.com/get-data-usage"
-STATUS_BASE_URL = "https://www.mozillion.com/get-data-usage-status"
+
 BASE_URL = "https://www.mozillion.com"
+LOGIN_PATH = "/login"
+LOGIN_POST_PATH = "/login-post"
+TWO_FACTOR_PATH = "/2fa/verify"
+DASHBOARD_PATH = "/new-user-dashboard"
+DATA_USAGE_PATH = "/get-data-usage"
+DATA_USAGE_STATUS_PATH = "/get-data-usage-status"
+
 CONF_ORDER_DETAIL_ID = "order_detail_id"
-CONF_SIM_PLAN_ID = "sim_plan_id"
+CONF_SIM_META_ID = "sim_meta_id"
 CONF_SIM_NUMBER = "sim_number"
+CONF_ICCID = "iccid"
 CONF_SESSION_COOKIE = "session_cookie"
 CONF_XSRF_TOKEN = "xsrf_token"
-CONF_USAGE_KEY = "usage_key"
-CONF_REMAINING_KEY = "remaining_key"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_EMAIL = "email"
 CONF_PASSWORD = "password"
 CONF_TOTP_SECRET = "totp_secret"
 CONF_ORIGIN = "origin"
-DEFAULT_USAGE_KEY = "usedData"
-DEFAULT_REMAINING_KEY = "totalData"
-DEFAULT_SCAN_INTERVAL = 86400
-DEFAULT_ORIGIN = "https://www.mozillion.com"
+
+# Mozillion regenerates usage server-side and answers "pending" until the
+# numbers are ready, so each poll mirrors the dashboard's own polling loop
+# (five attempts, three seconds apart).
+USAGE_POLL_ATTEMPTS = 5
+USAGE_POLL_DELAY = 3.0
+
+DEFAULT_SCAN_INTERVAL = 3600
+DEFAULT_ORIGIN = BASE_URL
 
 # Proactively re-authenticate once a session is older than this, so we never
-# poll with an already-expired cookie/token (the default 24h scan interval is
-# far longer than Mozillion session lifetimes).
+# poll with an already-expired cookie/token.
 AUTH_REFRESH_THRESHOLD = 43200  # 12 hours, in seconds
 
 ATTR_RAW = "raw"
 ATTR_USAGE = "usage"
-ATTR_REMAINING = "remaining"
-ATTR_SIM_NUMBER = "sim_number"
 ATTR_TOTAL = "total"
+ATTR_REMAINING = "remaining"
 ATTR_USAGE_PERCENTAGE = "usage_percentage"
 ATTR_UNLIMITED = "unlimited"
+ATTR_SIM_NUMBER = "sim_number"
+ATTR_ICCID = "iccid"
+ATTR_USAGE_GBR = "usage_gbr"
+ATTR_TOTAL_GBR = "total_gbr"
+ATTR_USAGE_GLOBAL = "usage_global"
+ATTR_TOTAL_GLOBAL = "total_global"
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "

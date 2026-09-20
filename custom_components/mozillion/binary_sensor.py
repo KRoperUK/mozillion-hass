@@ -2,60 +2,54 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import MozillionCoordinator
-from .const import ATTR_UNLIMITED, CONF_SIM_NUMBER, DOMAIN
+from .const import ATTR_UNLIMITED, ATTR_USAGE, ATTR_USAGE_PERCENTAGE
+from .coordinator import MozillionCoordinator
+from .entity import MozillionEntity
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Mozillion binary sensors from config entry."""
 
-    coordinator: MozillionCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    sim_number = entry.data.get(CONF_SIM_NUMBER, "")
+    coordinator = entry.runtime_data.coordinator
 
-    entities: list[BinarySensorEntity] = [
-        MozillionUnlimitedSensor(coordinator, entry, sim_number),
-    ]
-
-    async_add_entities(entities)
+    async_add_entities([MozillionUnlimitedSensor(coordinator, entry)])
 
 
-class MozillionUnlimitedSensor(
-    CoordinatorEntity[MozillionCoordinator], BinarySensorEntity
-):  # type: ignore[misc]
+class MozillionUnlimitedSensor(MozillionEntity, BinarySensorEntity):
     """Representation of Mozillion unlimited boolean sensor."""
 
-    _attr_has_entity_name = True
-    _attr_icon = "mdi:infinity"
+    _attr_translation_key = "unlimited"
 
     def __init__(
         self,
         coordinator: MozillionCoordinator,
         entry: ConfigEntry,
-        sim_number: str,
     ) -> None:
         """Initialize the unlimited sensor."""
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{entry.entry_id}_unlimited"
-        self._attr_name = "Unlimited"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, sim_number or entry.entry_id)},
-            name=f"Mozillion {sim_number}" if sim_number else "Mozillion",
-            manufacturer="Mozillion",
-            suggested_area="Network",
-        )
-        # Initialize the state
-        self._attr_is_on = False
+        super().__init__(coordinator, entry, ATTR_UNLIMITED)
 
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
-        self._attr_is_on = bool(self.coordinator.data.get(ATTR_UNLIMITED))
-        super()._handle_coordinator_update()
+    @property
+    def is_on(self) -> bool:
+        """Return True when the plan has no data cap."""
+        return bool(self.coordinator.data.get(ATTR_UNLIMITED))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose the figures the unlimited flag is derived from."""
+
+        data = self.coordinator.data
+        return {
+            ATTR_USAGE: data.get(ATTR_USAGE),
+            ATTR_USAGE_PERCENTAGE: data.get(ATTR_USAGE_PERCENTAGE),
+        }
