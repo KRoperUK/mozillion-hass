@@ -1,0 +1,97 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Mozillion",
+        "description": "Ceangail le Mozillion chun d'úsáid sonraí a fháil.",
+        "data": {
+          "email": "Ríomhphost",
+          "password": "Pasfhocal",
+          "totp_secret": "Rún TOTP (Base32, roghnach)",
+          "origin": "Ceanntásc Origin (roghnach)",
+          "session_cookie": "Ceanntásc Cookie (roghnach má úsáideann tú logáil isteach)",
+          "xsrf_token": "Ceanntásc comhartha XSRF (roghnach)",
+          "scan_interval": "Eatramh iarratais (soicindí)"
+        }
+      },
+      "select_sim": {
+        "title": "Roghnaigh SIM",
+        "description": "Roghnaigh an SIM le leanúint.",
+        "data": {
+          "sim": "SIM"
+        }
+      },
+      "manual_ids": {
+        "title": "Iontráil IDanna de láimh",
+        "description": "Iontráil ID do mhionsonraí ordaithe agus ID meite an SIM. Tá an dá cheann le feiceáil i roghnóir SIM ar dheais Mozillion.",
+        "data": {
+          "order_detail_id": "ID mionsonraí ordaithe",
+          "sim_meta_id": "ID meite SIM",
+          "sim_number": "Uimhir SIM (roghnach)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Athfhíoraigh Mozillion",
+        "description": "Tá do sheisiún Mozillion imithe in éag. Tabhair dintiúirí nua nó ceanntásc Cookie úr.",
+        "data": {
+          "email": "Ríomhphost",
+          "password": "Pasfhocal",
+          "totp_secret": "Rún TOTP (Base32, roghnach)",
+          "session_cookie": "Ceanntásc Cookie (roghnach má úsáideann tú logáil isteach)",
+          "xsrf_token": "Ceanntásc comhartha XSRF (roghnach)"
+        }
+      },
+      "reconfigure_confirm": {
+        "title": "Athchumraigh Mozillion",
+        "description": "Nuashonraigh na dintiúirí nó roghnaigh SIM eile le leanúint.",
+        "data": {
+          "email": "Ríomhphost",
+          "password": "Pasfhocal",
+          "totp_secret": "Rún TOTP (Base32, roghnach)",
+          "session_cookie": "Ceanntásc Cookie (roghnach má úsáideann tú logáil isteach)",
+          "xsrf_token": "Ceanntásc comhartha XSRF (roghnach)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Ní féidir ceangal. Seiceáil do dhintiúirí, an ceanntásc Cookie, agus go bhfuil an SIM fós ar do chuntas.",
+      "missing_auth": "Tabhair ríomhphost agus pasfhocal (agus TOTP go roghnach), nó ceanntásc Cookie."
+    },
+    "abort": {
+      "reauth_successful": "Athfhíorú déanta go rathúil.",
+      "already_configured": "Tá an SIM seo cumraithe cheana féin.",
+      "reconfigure_successful": "Athchumrú déanta go rathúil."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Roghanna Mozillion",
+        "data": {
+          "scan_interval": "Eatramh iarratais (soicindí)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "usage": {
+        "name": "Sonraí a úsáideadh"
+      },
+      "total": {
+        "name": "Líon iomlán"
+      },
+      "remaining": {
+        "name": "Sonraí fágtha"
+      },
+      "usage_percentage": {
+        "name": "Céatadán úsáide"
+      }
+    },
+    "binary_sensor": {
+      "unlimited": {
+        "name": "Gan teorainn"
+      }
+    }
+  }
+}

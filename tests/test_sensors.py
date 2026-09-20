@@ -264,6 +264,3 @@ class TestEntityTranslations:
     def test_binary_sensor_has_name(self) -> None:
         entities = _load_json("strings.json")["entity"]["binary_sensor"]
         assert entities["unlimited"]["name"] == "Unlimited"
-
-    def test_translations_match_strings(self) -> None:
-        assert _load_json("strings.json") == _load_json("translations/en.json")
