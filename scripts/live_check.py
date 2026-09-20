@@ -30,8 +30,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from dotenv import load_dotenv  # noqa: E402
-
 from custom_components.mozillion.api import (  # noqa: E402
     MozillionClient,
     MozillionSim,
@@ -40,6 +38,7 @@ from custom_components.mozillion.const import DEFAULT_ORIGIN  # noqa: E402
 from custom_components.mozillion.coordinator import (  # noqa: E402
     _build_coordinator_data,
 )
+from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(ROOT / ".env")
 
@@ -54,13 +53,11 @@ class CheckFailed(RuntimeError):
 def _require(name: str) -> str:
     value = os.environ.get(name, "")
     if not value:
-        raise SystemExit(
-            f"{name} is not set. Add it to .env or export it, then retry."
-        )
+        raise SystemExit(f"{name} is not set. Add it to .env or export it, then retry.")
     return value
 
 
-def _check(condition: bool, message: str) -> None:  # noqa: FBT001
+def _check(condition: bool, message: str) -> None:
     if not condition:
         raise CheckFailed(message)
     print(f"  ok: {message}")
@@ -142,7 +139,7 @@ def main() -> int:
     except CheckFailed as err:
         print(f"\nFAILED: {err}")
         return 1
-    except Exception as err:  # noqa: BLE001 - reported to the operator
+    except Exception as err:
         print(f"\nFAILED: {type(err).__name__}: {err}")
         return 1
 

@@ -44,12 +44,12 @@ jobs:
           filters: |
             component:
               - 'custom_components/**'
+              - 'scripts/**'
               - 'tests/**'
               - 'pyproject.toml'
               - 'uv.lock'
               - 'hacs.json'
               - '.github/workflows/ci.yml'
-              - 'scripts/compute-dev-tag.sh'
 
   lint:
     needs: changes
@@ -76,10 +76,10 @@ jobs:
       - name: Lint with ruff
         # --output-format=github emits ::error annotations inline on the
         # offending lines in the PR "Files changed" view.
-        run: source .venv/bin/activate && ruff check --output-format=github custom_components/ tests/
+        run: source .venv/bin/activate && ruff check --output-format=github custom_components/ scripts/ tests/
 
       - name: Check formatting
-        run: source .venv/bin/activate && ruff format --check custom_components/ tests/
+        run: source .venv/bin/activate && ruff format --check custom_components/ scripts/ tests/
 
   test:
     needs: changes
