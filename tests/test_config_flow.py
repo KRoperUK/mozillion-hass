@@ -450,3 +450,41 @@ async def test_reconfigure_rejects_a_failed_login(hass: HomeAssistant) -> None:
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "reconfigure_confirm"
     assert result["errors"]["base"] == "cannot_connect"
+
+
+async def test_reconfigure_migrates_a_v1_entry(hass: HomeAssistant) -> None:
+    """Reconfigure is the rescue path for an entry that could not migrate.
+
+    It collects the ids the migration would have discovered, so it must also
+    move the entry onto the current version -- otherwise setup would try to
+    migrate all over again and fail the same way.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Mozillion 07700900000",
+        data={k: v for k, v in MOCK_ENTRY_DATA_COOKIE.items() if k != CONF_SIM_META_ID},
+        unique_id="59835",
+        version=1,
+    )
+    entry.add_to_hass(hass)
+    assert entry.version == 1
+
+    with patch(CLIENT, return_value=_mock_client()):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_RECONFIGURE,
+                "entry_id": entry.entry_id,
+            },
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _credentials_only(_cookie_input())
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"sim": MOCK_SIM.display_name}
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.ABORT
+    assert entry.version == 2
+    assert entry.data[CONF_SIM_META_ID] == "21919"
+    assert entry.unique_id == "21919"
