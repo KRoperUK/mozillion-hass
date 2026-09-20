@@ -6,49 +6,87 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from custom_components.mozillion.api import MozillionSim
 from custom_components.mozillion.const import (
+    ATTR_ICCID,
     ATTR_RAW,
     ATTR_REMAINING,
     ATTR_SIM_NUMBER,
     ATTR_TOTAL,
+    ATTR_TOTAL_GBR,
+    ATTR_TOTAL_GLOBAL,
     ATTR_UNLIMITED,
     ATTR_USAGE,
+    ATTR_USAGE_GBR,
+    ATTR_USAGE_GLOBAL,
     ATTR_USAGE_PERCENTAGE,
     CONF_EMAIL,
+    CONF_ICCID,
     CONF_ORDER_DETAIL_ID,
     CONF_ORIGIN,
     CONF_PASSWORD,
-    CONF_REMAINING_KEY,
     CONF_SCAN_INTERVAL,
     CONF_SESSION_COOKIE,
+    CONF_SIM_META_ID,
     CONF_SIM_NUMBER,
-    CONF_SIM_PLAN_ID,
     CONF_TOTP_SECRET,
-    CONF_USAGE_KEY,
     CONF_XSRF_TOKEN,
     DEFAULT_ORIGIN,
-    DEFAULT_REMAINING_KEY,
     DEFAULT_SCAN_INTERVAL,
-    DEFAULT_USAGE_KEY,
 )
 from homeassistant.config_entries import ConfigEntry
 
 # ---------------------------------------------------------------------------
-# Sample data returned by the Mozillion API
+# Sample data returned by the Mozillion usage endpoints
 # ---------------------------------------------------------------------------
 MOCK_API_RESPONSE: dict[str, Any] = {
+    "status": "success",
     "usedData": 3.5,
     "totalData": 10.0,
+    "usedDataGbr": 3.5,
+    "totalDataGbr": 10.0,
+    "usedDataGlobal": 0.0,
+    "totalDataGlobal": 0.0,
     "isUnlimited": False,
-    "planName": "Test Plan",
 }
 
 MOCK_API_RESPONSE_UNLIMITED: dict[str, Any] = {
-    "usedData": 0.0,
-    "totalData": 0.0,
+    "status": "success",
+    "usedData": 5.0,
+    "totalData": 0,
+    "usedDataGbr": 5.0,
+    "totalDataGbr": 0,
+    "usedDataGlobal": 0.0,
+    "totalDataGlobal": 0.0,
     "isUnlimited": True,
-    "planName": "Unlimited Plan",
 }
+
+# The trigger endpoint answers this while the figures are being regenerated.
+MOCK_API_RESPONSE_PENDING: dict[str, Any] = {
+    "status": "pending",
+    "message": "Usage update is being processed.",
+}
+
+
+# ---------------------------------------------------------------------------
+# Sample dashboard SIM
+# ---------------------------------------------------------------------------
+MOCK_SIM = MozillionSim(
+    sim_meta_id="7654321",
+    order_detail_id="1234567",
+    sim_number="07700900000",
+    iccid="89440000000000000000",
+    label="Your SIM",
+    status="ACTIVE",
+    used_data=3.5,
+    total_data=10.0,
+    used_data_gbr=3.5,
+    total_data_gbr=10.0,
+    used_data_global=0.0,
+    total_data_global=0.0,
+    is_unlimited=False,
+    plan_data_tariff="10GB",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -59,29 +97,21 @@ MOCK_ENTRY_DATA_LOGIN: dict[str, Any] = {
     CONF_PASSWORD: "secret123",
     CONF_TOTP_SECRET: "",
     CONF_ORIGIN: DEFAULT_ORIGIN,
-    CONF_ORDER_DETAIL_ID: "order-1",
-    CONF_SIM_PLAN_ID: "sim-plan-1",
+    CONF_ORDER_DETAIL_ID: "1234567",
+    CONF_SIM_META_ID: "7654321",
     CONF_SIM_NUMBER: "07700900000",
+    CONF_ICCID: "89440000000000000000",
     CONF_SESSION_COOKIE: "",
     CONF_XSRF_TOKEN: "",
-    CONF_USAGE_KEY: DEFAULT_USAGE_KEY,
-    CONF_REMAINING_KEY: DEFAULT_REMAINING_KEY,
     CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
 }
 
 MOCK_ENTRY_DATA_COOKIE: dict[str, Any] = {
+    **MOCK_ENTRY_DATA_LOGIN,
     CONF_EMAIL: "",
     CONF_PASSWORD: "",
-    CONF_TOTP_SECRET: "",
-    CONF_ORIGIN: DEFAULT_ORIGIN,
-    CONF_ORDER_DETAIL_ID: "order-1",
-    CONF_SIM_PLAN_ID: "sim-plan-1",
-    CONF_SIM_NUMBER: "07700900000",
     CONF_SESSION_COOKIE: "mozillion_session=abc; XSRF-TOKEN=xyz",
     CONF_XSRF_TOKEN: "xyz",
-    CONF_USAGE_KEY: DEFAULT_USAGE_KEY,
-    CONF_REMAINING_KEY: DEFAULT_REMAINING_KEY,
-    CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
 }
 
 
@@ -95,17 +125,27 @@ MOCK_COORDINATOR_DATA: dict[str, Any] = {
     ATTR_REMAINING: 6.5,
     ATTR_USAGE_PERCENTAGE: 35.0,
     ATTR_UNLIMITED: False,
+    ATTR_USAGE_GBR: 3.5,
+    ATTR_TOTAL_GBR: 10.0,
+    ATTR_USAGE_GLOBAL: 0.0,
+    ATTR_TOTAL_GLOBAL: 0.0,
     ATTR_SIM_NUMBER: "07700900000",
+    ATTR_ICCID: "89440000000000000000",
 }
 
 MOCK_COORDINATOR_DATA_UNLIMITED: dict[str, Any] = {
     ATTR_RAW: MOCK_API_RESPONSE_UNLIMITED,
-    ATTR_USAGE: 0.0,
+    ATTR_USAGE: 5.0,
     ATTR_TOTAL: 0.0,
     ATTR_REMAINING: None,
     ATTR_USAGE_PERCENTAGE: None,
     ATTR_UNLIMITED: True,
+    ATTR_USAGE_GBR: 5.0,
+    ATTR_TOTAL_GBR: 0.0,
+    ATTR_USAGE_GLOBAL: 0.0,
+    ATTR_TOTAL_GLOBAL: 0.0,
     ATTR_SIM_NUMBER: "07700900000",
+    ATTR_ICCID: "89440000000000000000",
 }
 
 
@@ -119,7 +159,8 @@ def _make_config_entry(
     entry.entry_id = entry_id
     entry.data = data or MOCK_ENTRY_DATA_COOKIE
     entry.options = options or {}
-    entry.unique_id = entry.data.get(CONF_ORDER_DETAIL_ID, entry_id)
+    entry.version = 2
+    entry.unique_id = entry.data.get(CONF_SIM_META_ID, entry_id)
     entry.title = "Mozillion"
     return entry
 
@@ -145,14 +186,7 @@ def mock_api_client() -> AsyncMock:
         "xyz",
     )
     client.async_get_usage.return_value = MOCK_API_RESPONSE
-    client.async_fetch_dashboard_ids.return_value = [
-        {
-            "sim_plan_id": "sim-plan-1",
-            "order_detail_id": "order-1",
-            "name": "07700900000",
-            "sim_number": "07700900000",
-        }
-    ]
+    client.async_fetch_sims.return_value = [MOCK_SIM]
     return client
 
 

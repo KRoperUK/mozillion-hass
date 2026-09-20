@@ -1,0 +1,184 @@
+# Home Assistant Integration Quality Scale — self-assessment.
+#
+# hassfest only validates this file for core integrations; for a custom (HACS)
+# integration it is an honest status record. Every Bronze, Silver and Gold rule
+# is done or exempt. Platinum is not claimed: `strict-typing` cannot be met
+# while Home Assistant's own types are absent at type-check time, so the mypy
+# configuration relaxes the checks that are unsatisfiable for HA subclasses.
+rules:
+  # --- Bronze ---
+  action-setup:
+    status: exempt
+    comment: The integration registers no services.
+  appropriate-polling:
+    status: done
+    comment: >-
+      Polls on a configurable interval (default one hour). A shorter interval
+      cannot yield fresher numbers because Mozillion regenerates usage
+      server-side on its own schedule.
+  brands:
+    status: done
+    comment: Brand images for `mozillion` are published in home-assistant/brands.
+  common-modules:
+    status: done
+    comment: Shared device/entity wiring lives in ``entity.py``.
+  config-flow:
+    status: done
+    comment: >-
+      Credentials, then a SIM picker read from the dashboard, with a manual
+      id-entry fallback. Reauth and reconfigure flows are provided.
+  config-flow-test-coverage:
+    status: done
+    comment: >-
+      ``tests/test_config_flow.py`` drives the real flow manager over the full
+      matrix (login, cookie, no-auth, unreadable SIM list, duplicate SIM,
+      reauth, reconfigure, options).
+  dependency-transparency:
+    status: done
+    comment: ``pyotp`` is declared and pinned in ``manifest.json`` requirements.
+  docs-actions:
+    status: exempt
+    comment: The integration provides no actions.
+  docs-conditions:
+    status: exempt
+    comment: The integration provides no conditions.
+  docs-high-level-description:
+    status: done
+  docs-installation-instructions:
+    status: done
+  docs-removal-instructions:
+    status: done
+    comment: Documented under "Removal" in docs/installation.md.
+  docs-triggers:
+    status: exempt
+    comment: The integration provides no triggers.
+  entity-event-setup:
+    status: done
+    comment: Entities are CoordinatorEntity subclasses; subscriptions are managed by the base class.
+  entity-unique-id:
+    status: done
+  has-entity-name:
+    status: done
+  runtime-data:
+    status: done
+    comment: The client and coordinator are stored in ``entry.runtime_data``.
+  test-before-configure:
+    status: done
+    comment: The config flow performs a real usage fetch before creating the entry.
+  test-before-setup:
+    status: done
+    comment: >-
+      ``async_config_entry_first_refresh`` runs during setup, so a failing API
+      surfaces as ConfigEntryNotReady (retry) or ConfigEntryAuthFailed (reauth)
+      instead of a silently broken entry.
+  unique-config-entry:
+    status: done
+    comment: The SIM meta id is the unique id, so one SIM cannot be added twice.
+
+  # --- Silver ---
+  action-exceptions:
+    status: exempt
+    comment: The integration provides no actions.
+  config-entry-unloading:
+    status: done
+  docs-configuration-parameters:
+    status: done
+  docs-installation-parameters:
+    status: done
+  entity-unavailable:
+    status: done
+    comment: Entities are unavailable whenever the last poll failed.
+  integration-owner:
+    status: done
+  log-when-unavailable:
+    status: done
+    comment: The coordinator logs update failures and re-authentication attempts.
+  parallel-updates:
+    status: exempt
+    comment: Each entry makes its own serialised polling calls; there are no service calls to limit.
+  reauthentication-flow:
+    status: done
+    comment: Expired or rejected credentials start a reauth flow, with the email prefilled.
+  test-coverage:
+    status: done
+    comment: Branch coverage is above the repository's floor; see CI.
+
+  # --- Gold ---
+  devices:
+    status: done
+    comment: One device per SIM, keyed by the SIM meta id, serialised by the ICCID.
+  diagnostics:
+    status: done
+    comment: >-
+      Email, password, TOTP secret, session cookie and XSRF token are redacted
+      from both the entry and the coordinator payload.
+  discovery:
+    status: exempt
+    comment: Mozillion exposes no discovery mechanism for its SIMs.
+  discovery-update-info:
+    status: exempt
+    comment: No discovery.
+  docs-data-update:
+    status: done
+    comment: The request/response handshake and poll interval are documented.
+  docs-examples:
+    status: done
+  docs-known-limitations:
+    status: done
+    comment: Documented, including the unverified per-bucket figures.
+  docs-supported-devices:
+    status: done
+  docs-supported-functions:
+    status: done
+  docs-troubleshooting:
+    status: done
+  docs-use-cases:
+    status: done
+  dynamic-devices:
+    status: exempt
+    comment: A SIM's entities are decided at setup; the set does not change at runtime.
+  entity-category:
+    status: exempt
+    comment: Every entity is primary data; none are diagnostic or configuration settings.
+  entity-device-class:
+    status: done
+    comment: Data sensors use DATA_SIZE and the percentage sensor uses MEASUREMENT.
+  entity-disabled-by-default:
+    status: exempt
+    comment: All entities are useful on their own and are enabled by default.
+  entity-translations:
+    status: done
+    comment: Entity names are translated in strings.json and icons.json.
+  exception-translations:
+    status: exempt
+    comment: >-
+      The integration raises no user-facing exceptions — there are no services
+      or actions. Failures surface as config entry state and the reauth flow.
+  icon-translations:
+    status: done
+  reconfiguration-flow:
+    status: done
+    comment: Reconfigure keeps the entry and its history while switching SIM or refreshing credentials.
+  repair-issues:
+    status: exempt
+    comment: >-
+      The one actionable failure (rejected credentials) is already handled by
+      the reauth flow, which the UI links to directly.
+  stale-devices:
+    status: exempt
+    comment: Devices are removed with their config entry.
+
+  # --- Platinum ---
+  async-dependency:
+    status: exempt
+    comment: pyotp performs local computation with no I/O; the only network client is aiohttp.
+  inject-websession:
+    status: done
+    comment: The Home Assistant shared aiohttp session is injected via async_get_clientsession.
+  strict-typing:
+    status: todo
+    comment: >-
+      mypy runs over the component but relaxes the checks that cannot be
+      satisfied while Home Assistant's own types are absent at check time
+      (homeassistant is a test-only dependency). Revisit once the HA types are
+      available to the type checker.

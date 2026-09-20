@@ -4,7 +4,11 @@
   <img src="https://brands.home-assistant.io/mozillion/icon.png" alt="Mozillion Logo" width="200"/>
 </p>
 
-This repository contains a Home Assistant custom component that fetches Mozillion data usage.
+Tracks your [Mozillion](https://www.mozillion.com/) mobile data usage in Home
+Assistant: how much you have used, how much is left, and whether the plan is
+unlimited.
+
+> This is an unofficial integration and is not affiliated with Mozillion.
 
 ## Installation
 
@@ -31,34 +35,74 @@ This repository contains a Home Assistant custom component that fetches Mozillio
 5. Search for "Mozillion" and follow the configuration steps
 
 ## Features
-- Config flow for easy setup
-- Supports manual cookies + XSRF token
-- Supports automated login with email/password and optional TOTP secret
-- Two sensors: usage and remaining, plus raw payload attribute
+
+- Config flow that reads your SIMs from the dashboard and lets you pick one
+- Automated login with email/password and optional TOTP secret (accepts the
+  Base32 secret or the whole `otpauth://` link)
+- Manual cookie + XSRF token mode if you would rather not store a password
+- Four sensors — usage, total, remaining and percentage — plus raw payload and
+  per-bucket attributes
+- Unlimited plan binary sensor
+- Transparent re-authentication, with reauth and reconfigure flows
+- Redacted diagnostics downloads
+
+Entities are named `Usage`, `Total`, `Remaining`, `Usage Percentage` and
+`Unlimited` under a **Mozillion \<your SIM number\>** device.
+
+## Configuration
+
+Add the integration and choose one of:
+
+- **Email, password and (if enabled) TOTP secret** — the integration logs in and
+  keeps the session fresh by itself. Recommended.
+- **A session cookie** copied from your browser — simplest to set up, but you
+  will be asked for a fresh cookie when it expires.
+
+You then pick your SIM from a dropdown. The scan interval defaults to one hour
+and is configurable through the integration's options.
+
+Full details: [installation](docs/installation.md) ·
+[use cases, entities and examples](docs/index.md) ·
+[troubleshooting](docs/TROUBLESHOOTING.md).
+
+## How it works
+
+Mozillion regenerates usage server-side, so each poll triggers a refresh and
+then polls the status endpoint until it reports `success` — the same handshake
+the website's own refresh button performs.
 
 ## Development
+
 1. Create a virtual env and install dev deps:
    ```bash
    uv sync --dev
    source .venv/bin/activate
    ```
-2. For a quick HA dev instance, use Docker Compose:
+2. Run the checks (this is what CI runs):
+   ```bash
+   make check   # ruff lint + format check
+   make test    # pytest with the HA test harness
+   ```
+3. For a quick HA dev instance, use Docker Compose:
    ```bash
    docker compose -f docker-compose.dev.yml up -d
    ```
-   Home Assistant UI will be at http://localhost:8123. An example config lives in `example-config/` and the custom component is bind-mounted.
-
-## Usage in Home Assistant
-- Option A (auto-login): Provide email, password, and TOTP secret (Base32) if applicable. Leave cookie/XSRF fields blank; the integration logs in and handles 2FA.
-- Option B (manual cookies): Paste the full Cookie header (including mozillion_session, XSRF-TOKEN, etc.) and the decoded XSRF token for the header. Leave email/password blank.
-- Provide your `order_detail_id` and adjust dotted JSON keys if the defaults (`data_usage`, `data_remaining`) differ.
+   Home Assistant UI will be at http://localhost:8123. An example config lives in
+   `example-config/` and the custom component is bind-mounted.
+4. To verify against the real API (needs credentials in `.env`, see
+   `scripts/live_check.py`):
+   ```bash
+   make test-live
+   ```
 
 ## Notes
-- CSRF token from the XSRF-TOKEN cookie must be URL-decoded when sent as the X-XSRF-TOKEN header. The integration handles this automatically when it logs in.
-- Enable debug logs in HA if needed:
+
+- Enable debug logs if needed:
   ```yaml
   logger:
     default: warning
     logs:
       custom_components.mozillion: debug
   ```
+- `MOZILLION_2FA` in `.env` accepts either a Base32 secret or an `otpauth://`
+  link for the live check.

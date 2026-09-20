@@ -15,21 +15,27 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import MozillionAuthError, MozillionClient
 from .const import (
+    ATTR_ICCID,
     ATTR_RAW,
     ATTR_REMAINING,
     ATTR_SIM_NUMBER,
     ATTR_TOTAL,
+    ATTR_TOTAL_GBR,
+    ATTR_TOTAL_GLOBAL,
     ATTR_UNLIMITED,
     ATTR_USAGE,
+    ATTR_USAGE_GBR,
+    ATTR_USAGE_GLOBAL,
     ATTR_USAGE_PERCENTAGE,
     AUTH_REFRESH_THRESHOLD,
     CONF_EMAIL,
+    CONF_ICCID,
     CONF_ORDER_DETAIL_ID,
     CONF_ORIGIN,
     CONF_PASSWORD,
     CONF_SESSION_COOKIE,
+    CONF_SIM_META_ID,
     CONF_SIM_NUMBER,
-    CONF_SIM_PLAN_ID,
     CONF_TOTP_SECRET,
     CONF_XSRF_TOKEN,
     DEFAULT_ORIGIN,
@@ -40,24 +46,30 @@ _LOGGER = logging.getLogger(__name__)
 CoordinatorData = dict[str, Any]
 
 
+def _to_float(value: Any) -> float | None:
+    """Coerce an API value to float, treating blanks/None as unknown."""
+
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
-    """Coordinator to poll the Mozillion endpoint."""
+    """Coordinator to poll the Mozillion usage endpoints."""
 
     def __init__(
         self,
         hass: HomeAssistant,
         client: MozillionClient,
         entry: ConfigEntry,
-        usage_key: str,
-        remaining_key: str,
         cookie_header: str | None,
         xsrf_header: str | None,
         update_interval: timedelta,
     ) -> None:
         self.client = client
-        self.entry = entry
-        self.usage_key = usage_key
-        self.remaining_key = remaining_key
         self.cookie_header = cookie_header
         self.xsrf_header = xsrf_header
         self.email = entry.data.get(CONF_EMAIL)
@@ -74,6 +86,9 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             _LOGGER,
             name="Mozillion Data",
             update_interval=update_interval,
+            # async_config_entry_first_refresh refuses to run for a coordinator
+            # that does not know which config entry owns it.
+            config_entry=entry,
         )
 
     def _needs_auth(self) -> bool:
@@ -116,12 +131,22 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
         reload or restart does not immediately start with a stale token.
         """
 
-        if self.entry is None:
+        if self.config_entry is None:
             return
-        new_data = dict(self.entry.data)
+        new_data = dict(self.config_entry.data)
         new_data[CONF_SESSION_COOKIE] = self.cookie_header or ""
         new_data[CONF_XSRF_TOKEN] = self.xsrf_header or ""
-        self.hass.config_entries.async_update_entry(self.entry, data=new_data)
+        self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
+
+    async def _async_fetch_usage(self) -> dict[str, Any]:
+        """Call the usage endpoints with the current session."""
+
+        return await self.client.async_get_usage(
+            order_detail_id=self.config_entry.data[CONF_ORDER_DETAIL_ID],
+            sim_meta_id=self.config_entry.data[CONF_SIM_META_ID],
+            cookie_header=self.cookie_header or "",
+            xsrf_token=self.xsrf_header,
+        )
 
     async def _async_update_data(self) -> CoordinatorData:
         """Fetch data from API, transparently re-authenticating on expiry."""
@@ -132,100 +157,96 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 await self._async_refresh_auth()
 
             if not self.cookie_header:
-                if self.email and self.password:
-                    _LOGGER.error("No cookies available for Mozillion request")
-                    raise RuntimeError("No cookies available for Mozillion request")
                 raise ConfigEntryAuthFailed(
                     "No session cookie and no credentials are configured to "
-                    "obtain one. Please re-configure the integration."
+                    "obtain one. Please reconfigure the integration."
                 )
 
-            raw = await self.client.async_get_usage(
-                order_detail_id=self.entry.data[CONF_ORDER_DETAIL_ID],
-                sim_plan_id=self.entry.data[CONF_SIM_PLAN_ID],
-                cookie_header=self.cookie_header,
-                xsrf_token=self.xsrf_header,
-            )
-        except MozillionAuthError:
-            # The session expired mid-flight. Re-authenticate once and retry,
-            # but only if we actually have credentials to do so.
-            if self.email and self.password:
-                _LOGGER.warning(
-                    "Mozillion session expired; re-authenticating and retrying"
-                )
-                await self._async_refresh_auth()
-                if not self.cookie_header:
-                    raise UpdateFailed(
-                        "Re-authentication failed to obtain a session"
-                    ) from None
-                try:
-                    raw = await self.client.async_get_usage(
-                        order_detail_id=self.entry.data[CONF_ORDER_DETAIL_ID],
-                        sim_plan_id=self.entry.data[CONF_SIM_PLAN_ID],
-                        cookie_header=self.cookie_header,
-                        xsrf_token=self.xsrf_header,
-                    )
-                except MozillionAuthError as err:
-                    raise UpdateFailed(
-                        "Re-authentication did not restore access"
-                    ) from err
-            else:
-                raise ConfigEntryAuthFailed(
-                    "Session expired and no credentials are configured to "
-                    "re-authenticate. Please update the integration's "
-                    "credentials or provide a fresh cookie."
-                ) from None
+            raw = await self._async_fetch_usage()
+        except MozillionAuthError as err:
+            raw = await self._async_retry_after_auth_error(err)
         except (RuntimeError, ClientError) as err:
             _LOGGER.error("Update failed: %s", err)
             raise UpdateFailed(err) from err
 
-        usage = _deep_get(raw, self.usage_key)
-        total = _deep_get(raw, self.remaining_key)
-        unlimited = _deep_get(raw, "isUnlimited") or False
-
-        # Calculate remaining as total - used
-        remaining = None
-        usage_percentage = None
-        if total is not None and usage is not None:
-            try:
-                remaining = float(total) - float(usage)
-                usage_percentage = (
-                    (float(usage) / float(total)) * 100 if float(total) > 0 else 0
-                )
-            except (ValueError, TypeError):
-                remaining = total
+        data = _build_coordinator_data(raw)
+        data[ATTR_SIM_NUMBER] = self.config_entry.data.get(CONF_SIM_NUMBER, "")
+        data[ATTR_ICCID] = self.config_entry.data.get(CONF_ICCID, "")
 
         _LOGGER.debug(
             "Update success: usage=%s, total=%s, remaining=%s, "
             "percentage=%s, unlimited=%s",
-            usage,
-            total,
-            remaining,
-            usage_percentage,
-            unlimited,
+            data[ATTR_USAGE],
+            data[ATTR_TOTAL],
+            data[ATTR_REMAINING],
+            data[ATTR_USAGE_PERCENTAGE],
+            data[ATTR_UNLIMITED],
         )
+        return data
 
-        return {
-            ATTR_RAW: raw,
-            ATTR_USAGE: usage,
-            ATTR_TOTAL: total,
-            ATTR_REMAINING: remaining,
-            ATTR_USAGE_PERCENTAGE: usage_percentage,
-            ATTR_UNLIMITED: unlimited,
-            ATTR_SIM_NUMBER: self.entry.data.get(CONF_SIM_NUMBER, ""),
-        }
+    async def _async_retry_after_auth_error(
+        self, error: MozillionAuthError
+    ) -> dict[str, Any]:
+        """Re-authenticate once after a rejected session, then retry the fetch.
+
+        Only entries with credentials can recover; a cookie-only entry has to
+        hand the problem to the user via a reauth flow.
+        """
+
+        if not (self.email and self.password):
+            raise ConfigEntryAuthFailed(
+                "Session expired and no credentials are configured to "
+                "re-authenticate. Please update the integration's credentials or "
+                "provide a fresh cookie."
+            ) from error
+
+        _LOGGER.warning("Mozillion session expired; re-authenticating and retrying")
+        try:
+            await self._async_refresh_auth()
+            if not self.cookie_header:
+                raise UpdateFailed(
+                    "Re-authentication failed to obtain a session"
+                ) from None
+            return await self._async_fetch_usage()
+        except MozillionAuthError as retry_error:
+            # The credentials themselves are wrong: a retry will not help, so
+            # ask the user instead of looping.
+            raise ConfigEntryAuthFailed(
+                "Mozillion rejected the configured credentials"
+            ) from retry_error
+        except (RuntimeError, ClientError) as retry_error:
+            raise UpdateFailed(retry_error) from retry_error
 
 
-def _deep_get(data: Any, dotted_key: str | None) -> Any:
-    """Safely fetch nested value using dotted key."""
+def _build_coordinator_data(raw: dict[str, Any]) -> CoordinatorData:
+    """Turn a completed usage payload into coordinator data.
 
-    if not dotted_key:
-        return None
+    ``usedData``/``totalData`` are what the dashboard itself renders, so they
+    drive the primary sensors. The GBR and global buckets are carried through
+    as diagnostics -- they are unverified (see the integration docs).
+    """
 
-    current: Any = data
-    for part in dotted_key.split("."):
-        if isinstance(current, dict) and part in current:
-            current = current[part]
-        else:
-            return None
-    return current
+    usage = _to_float(raw.get("usedData"))
+    total = _to_float(raw.get("totalData"))
+    unlimited = bool(raw.get("isUnlimited"))
+
+    remaining: float | None = None
+    usage_percentage: float | None = None
+
+    if usage is not None and total is not None and total > 0:
+        # Mirror the dashboard: never show a negative balance or >100% used.
+        remaining = max(0.0, total - usage)
+        usage_percentage = min(100.0, (usage / total) * 100)
+
+    return {
+        ATTR_RAW: raw,
+        ATTR_USAGE: usage,
+        ATTR_TOTAL: total,
+        ATTR_REMAINING: remaining,
+        ATTR_USAGE_PERCENTAGE: usage_percentage,
+        ATTR_UNLIMITED: unlimited,
+        ATTR_USAGE_GBR: _to_float(raw.get("usedDataGbr")),
+        ATTR_TOTAL_GBR: _to_float(raw.get("totalDataGbr")),
+        ATTR_USAGE_GLOBAL: _to_float(raw.get("usedDataGlobal")),
+        ATTR_TOTAL_GLOBAL: _to_float(raw.get("totalDataGlobal")),
+    }
