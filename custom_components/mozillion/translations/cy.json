@@ -1,0 +1,97 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Mozillion",
+        "description": "Cysylltwch â Mozillion i nôl eich defnydd data.",
+        "data": {
+          "email": "E-bost",
+          "password": "Cyfrinair",
+          "totp_secret": "Cyfrinair TOTP (Base32, dewisol)",
+          "origin": "Pennawd Origin (dewisol)",
+          "session_cookie": "Pennawd Cookie (dewisol os ydych yn mewngofnodi)",
+          "xsrf_token": "Pennawd tocyn XSRF (dewisol)",
+          "scan_interval": "Cyfwng holi (eiliadau)"
+        }
+      },
+      "select_sim": {
+        "title": "Dewis SIM",
+        "description": "Dewiswch pa SIM i'w ddilyn.",
+        "data": {
+          "sim": "SIM"
+        }
+      },
+      "manual_ids": {
+        "title": "Nodi IDau â llaw",
+        "description": "Nodwch eich ID manylion archeb a'r ID meta SIM. Mae'r ddau i'w gweld yn newisydd SIM bwrdd dangos Mozillion.",
+        "data": {
+          "order_detail_id": "ID manylion archeb",
+          "sim_meta_id": "ID meta SIM",
+          "sim_number": "Rhif SIM (dewisol)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Ail-ddilysu Mozillion",
+        "description": "Mae eich sesiwn Mozillion wedi dod i ben. Rhowch ddilysiadau newydd neu bennawd Cookie newydd.",
+        "data": {
+          "email": "E-bost",
+          "password": "Cyfrinair",
+          "totp_secret": "Cyfrinair TOTP (Base32, dewisol)",
+          "session_cookie": "Pennawd Cookie (dewisol os ydych yn mewngofnodi)",
+          "xsrf_token": "Pennawd tocyn XSRF (dewisol)"
+        }
+      },
+      "reconfigure_confirm": {
+        "title": "Ailffurfweddu Mozillion",
+        "description": "Diweddarwch y dilysiadau neu dewiswch SIM wahanol i'w dilyn.",
+        "data": {
+          "email": "E-bost",
+          "password": "Cyfrinair",
+          "totp_secret": "Cyfrinair TOTP (Base32, dewisol)",
+          "session_cookie": "Pennawd Cookie (dewisol os ydych yn mewngofnodi)",
+          "xsrf_token": "Pennawd tocyn XSRF (dewisol)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Methu cysylltu. Gwiriwch eich dilysiadau, y pennawd Cookie, ac a yw'r SIM yn dal ar eich cyfrif.",
+      "missing_auth": "Rhowch naill ai e-bost a chyfrinair (a TOTP yn ddewisol) neu bennawd Cookie."
+    },
+    "abort": {
+      "reauth_successful": "Ail-ddilysu'n llwyddiannus.",
+      "already_configured": "Mae'r SIM hwn eisoes wedi'i ffurfweddu.",
+      "reconfigure_successful": "Ailffurfweddu'n llwyddiannus."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opsiynau Mozillion",
+        "data": {
+          "scan_interval": "Cyfwng holi (eiliadau)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "usage": {
+        "name": "Defnydd data"
+      },
+      "total": {
+        "name": "Lwfans data"
+      },
+      "remaining": {
+        "name": "Data sy'n weddill"
+      },
+      "usage_percentage": {
+        "name": "Canran y defnydd"
+      }
+    },
+    "binary_sensor": {
+      "unlimited": {
+        "name": "Diderfyn"
+      }
+    }
+  }
+}
