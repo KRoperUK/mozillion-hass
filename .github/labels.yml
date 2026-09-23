@@ -1,0 +1,70 @@
+# Managed by .github/workflows/sync-labels.yml (EndBug/label-sync).
+#
+# Every label this repository's automation applies is declared here, because
+# sync-labels.yml runs with `delete-other-labels: true`: a label missing from this
+# file is deleted from the repository on the next sync. Two sets are load-bearing:
+#
+#   * `dependencies`, `python`, `github-actions` — applied by .github/dependabot.yml.
+#     Note the hyphen in `github-actions`: it must match dependabot.yml exactly, or
+#     GitHub drops the label silently when Dependabot opens a PR.
+#   * `autorelease: pending` and `autorelease: tagged` — applied and consumed by
+#     release-please to track its own release PR. Deleting these mid-flight breaks
+#     that tracking.
+#
+# Pruned as scaffold noise: `javascript`, `docker`, `ruby` and `terraform` are
+# Dependabot ecosystem labels for ecosystems this repository does not use, and
+# `python:uv` and `release` are applied by nothing — dependabot.yml sets its labels
+# explicitly, so the ecosystem default is never used.
+#
+# The stock `duplicate`, `good first issue`, `help wanted`, `invalid` and `wontfix`
+# are kept deliberately, unlike in the Dimplex integration: they are GitHub UI
+# affordances rather than config, so removing them removes the picker entries too.
+# Nothing applies them automatically; a maintainer labels by hand.
+
+# --- Conventional issue / PR labels ---
+- name: bug
+  color: "d73a4a"
+  description: Something isn't working
+- name: documentation
+  color: "0075ca"
+  description: Improvements or additions to documentation
+- name: enhancement
+  color: "a2eeef"
+  description: New feature or request
+- name: question
+  color: "d876e3"
+  description: Further information is requested
+- name: duplicate
+  color: "cfd3d7"
+  description: This issue or pull request already exists
+- name: good first issue
+  color: "7057ff"
+  description: Good for newcomers
+- name: help wanted
+  color: "008672"
+  description: Extra attention is needed
+- name: invalid
+  color: "e4e669"
+  description: This doesn't seem right
+- name: wontfix
+  color: "ffffff"
+  description: This will not be worked on
+
+# --- Dependency labels, applied by .github/dependabot.yml ---
+- name: dependencies
+  color: "0366d6"
+  description: Pull requests that update a dependency file
+- name: python
+  color: "2b67c6"
+  description: Pull requests that update Python code
+- name: github-actions
+  color: "000000"
+  description: Pull requests that update GitHub Actions code
+
+# --- Release Please ---
+- name: "autorelease: pending"
+  color: "ededed"
+  description: Release-please is preparing a release
+- name: "autorelease: tagged"
+  color: "ededed"
+  description: Release-please has tagged a release
