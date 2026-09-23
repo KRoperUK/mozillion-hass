@@ -133,8 +133,15 @@ rules:
   docs-use-cases:
     status: done
   dynamic-devices:
-    status: exempt
-    comment: A SIM's entities are decided at setup; the set does not change at runtime.
+    status: done
+    comment: >-
+      Adding a SIM through the subentry flow creates its device and entities with
+      no further action: the entry reloads when its subentries change, so a new
+      SIM is set up exactly like the first. Removing a SIM subentry removes them
+      again, which Home Assistant handles by clearing the device and entity
+      registry entries for it. Both halves are covered end to end by
+      ``test_adding_a_sim_produces_its_entities`` and
+      ``test_removing_a_sim_removes_its_entities``.
   entity-category:
     status: exempt
     comment: Every entity is primary data; none are diagnostic or configuration settings.
@@ -165,7 +172,13 @@ rules:
       credentials are handled by the reauth flow instead.
   stale-devices:
     status: exempt
-    comment: Devices are removed with their config entry.
+    comment: >-
+      A device goes when its config entry or its SIM subentry goes, both handled
+      by Home Assistant. A SIM deleted from the Mozillion account is not detected
+      automatically -- the integration does not re-read the account's SIM list on
+      every poll -- so its reads start failing, which raises the dashboard repair
+      issue, and the user removes the SIM. Auto-removing a device from a failed
+      read would risk deleting entities over a transient outage.
 
   # --- Platinum ---
   async-dependency:

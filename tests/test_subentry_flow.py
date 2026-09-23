@@ -379,3 +379,36 @@ async def test_adding_a_sim_produces_its_entities(hass: HomeAssistant) -> None:
     # The first SIM keeps its own entities, and each SIM gets its own device.
     assert any(MOCK_SIM.sim_number in entity_id for entity_id in _entity_ids(hass))
     assert len(devices) == 2, [device.name for device in devices]
+
+
+async def test_removing_a_sim_removes_its_entities(hass: HomeAssistant) -> None:
+    """The other half of dynamic devices: removal cleans up after itself.
+
+    Home Assistant clears the device and entity registry entries for a removed
+    subentry, and the entry reloads, so the remaining SIM is unaffected.
+    """
+
+    async with _account(hass, _client([MOCK_SIM, SECOND_SIM])) as entry:
+        result = await _start_flow(hass, entry)
+        await hass.config_entries.subentries.async_configure(
+            result["flow_id"], {"sim": SECOND_SIM.display_name}
+        )
+        await hass.async_block_till_done()
+        assert any(SECOND_SIM.sim_number in e for e in _entity_ids(hass))
+
+        second = next(
+            subentry
+            for subentry in _sim_subentries(entry)
+            if subentry.unique_id == SECOND_SIM.sim_meta_id
+        )
+        assert (
+            hass.config_entries.async_remove_subentry(entry, second.subentry_id) is True
+        )
+        await hass.async_block_till_done()
+
+        devices = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
+
+    remaining = _entity_ids(hass)
+    assert not any(SECOND_SIM.sim_number in entity_id for entity_id in remaining)
+    assert any(MOCK_SIM.sim_number in entity_id for entity_id in remaining)
+    assert len(devices) == 1, [device.name for device in devices]
