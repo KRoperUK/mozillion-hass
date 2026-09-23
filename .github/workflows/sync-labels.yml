@@ -1,0 +1,37 @@
+name: Sync labels
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/labels.yml
+      - .github/workflows/sync-labels.yml
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+
+concurrency:
+  group: sync-labels
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Sync labels from .github/labels.yml
+        uses: EndBug/label-sync@52074158190acb45f3077f9099fea818aa43f97a # v2.3.3
+        with:
+          config-file: .github/labels.yml
+          # labels.yml is the source of truth, so labels it does not list are
+          # removed. Without this, pruning the file does nothing and every removal
+          # needs a manual `gh label delete`.
+          #
+          # Every label this repository's automation applies is declared in
+          # labels.yml, so nothing in use is at risk: dependabot.yml's three, and
+          # release-please's `autorelease:` pair.
+          delete-other-labels: true
+          token: ${{ secrets.GITHUB_TOKEN }}
