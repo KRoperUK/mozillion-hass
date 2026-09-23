@@ -53,6 +53,7 @@ from .const import (
     CONF_SIM_NUMBER,
     CONF_TOTP_SECRET,
     CONF_XSRF_TOKEN,
+    DASHBOARD_REFRESH_INTERVAL,
     DEFAULT_ORIGIN,
     DOMAIN,
     ISSUE_DASHBOARD_UNREADABLE,
@@ -96,15 +97,7 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self.password = entry.data.get(CONF_PASSWORD)
         self.totp_secret = entry.data.get(CONF_TOTP_SECRET) or None
         self.origin = entry.data.get(CONF_ORIGIN, DEFAULT_ORIGIN)
-        # Monotonic time of the last successful authentication, used to decide
-        # when to proactively refresh an expiring session. Unknown (None) until
-        # we authenticate, which forces a refresh when credentials are present.
-        self._auth_time: float | None = None
-        # Consecutive failed reads of the dashboard, used to decide when the
-        # markup breakage is worth telling the user about, and whether we have
-        # an outstanding repair to withdraw.
-        self._dashboard_failures = 0
-        self._dashboard_repair_active = False
+        self._reset_poll_state()
 
         super().__init__(
             hass,
@@ -115,6 +108,28 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             # that does not know which config entry owns it.
             config_entry=entry,
         )
+
+    def _reset_poll_state(self) -> None:
+        """Initialise the per-session poll state.
+
+        Kept out of ``__init__`` so tests that build a coordinator without running
+        it can reach the same state by calling this, instead of mirroring each
+        attribute by hand and silently breaking when one is added.
+        """
+
+        # Monotonic time of the last successful authentication, used to decide
+        # when to proactively refresh an expiring session. Unknown (None) until
+        # we authenticate, which forces a refresh when credentials are present.
+        self._auth_time: float | None = None
+        # Consecutive failed reads of the dashboard, used to decide when the
+        # markup breakage is worth telling the user about, and whether we have an
+        # outstanding repair to withdraw.
+        self._dashboard_failures = 0
+        self._dashboard_repair_active = False
+        # Last good dashboard reading, reused until DASHBOARD_REFRESH_INTERVAL
+        # has passed, so the big page is not re-read every poll.
+        self._sim_detail: MozillionSim | None = None
+        self._sim_detail_at: float | None = None
 
     def _needs_auth(self) -> bool:
         """Return True when the session should be (re)authenticated now."""
@@ -226,12 +241,21 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
     async def _async_read_dashboard(self) -> MozillionSim | None:
         """Read the dashboard detail, tracking whether the page still parses.
 
-        The page markup is this integration's one genuinely fragile dependency,
-        and when it changes the only symptom used to be a log line: the plan,
-        status and reset entities quietly went unavailable and the user had no
-        idea why. Consecutive failures now raise a repair, because the fix is
-        outside Home Assistant.
+        The 355 KB dashboard page carries the plan, service status and reset date --
+        none of which change on an hourly basis (the reset label is monthly) -- so it
+        is refreshed on its own slower cadence and the rest of the poll reuses it.
+        Usage and the wallet come from small JSON calls and keep the full interval.
+
+        The page markup is also this integration's one genuinely fragile dependency,
+        and when it changes the only symptom used to be a log line: the plan, status
+        and reset entities quietly went unavailable and the user had no idea why.
+        Consecutive failures now raise a repair, because the fix is outside Home
+        Assistant, and the last good reading keeps being served meanwhile.
         """
+
+        cached = self._cached_sim_detail()
+        if cached is not None:
+            return cached
 
         try:
             sim = await self._async_fetch_sim()
@@ -247,7 +271,12 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             )
             if self._dashboard_failures >= REPAIR_FAILURE_THRESHOLD:
                 self._raise_dashboard_repair(str(err))
-            return None
+            # Keep serving the last good reading rather than blanking the plan,
+            # status and reset entities over one failed refresh.
+            return self._sim_detail
+
+        self._sim_detail = sim
+        self._sim_detail_at = time.monotonic()
 
         if self._dashboard_failures:
             _LOGGER.info(
@@ -257,6 +286,15 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             self._dashboard_failures = 0
         self._clear_dashboard_repair()
         return sim
+
+    def _cached_sim_detail(self) -> MozillionSim | None:
+        """Return the cached dashboard detail while it is still fresh."""
+
+        if self._sim_detail is None or self._sim_detail_at is None:
+            return None
+        if (time.monotonic() - self._sim_detail_at) < DASHBOARD_REFRESH_INTERVAL:
+            return self._sim_detail
+        return None
 
     def _raise_dashboard_repair(self, error: str) -> None:
         """Tell the user the dashboard cannot be read."""

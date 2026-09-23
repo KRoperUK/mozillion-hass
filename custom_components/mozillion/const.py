@@ -38,6 +38,12 @@ DEFAULT_ORIGIN = BASE_URL
 # poll with an already-expired cookie/token.
 AUTH_REFRESH_THRESHOLD = 43200  # 12 hours, in seconds
 
+# The plan, SIM status and reset date come from a 355 KB dashboard page. None of
+# them change hourly (the reset label is monthly), so the page is refreshed on
+# its own slower cadence while the JSON usage and wallet calls keep the poll
+# interval. Also reduces how often we spend part of Mozillion's request budget.
+DASHBOARD_REFRESH_INTERVAL = 21600  # 6 hours, in seconds
+
 # The dashboard markup is the integration's one genuinely fragile dependency;
 # raise a repair once reading it has failed this many polls in a row, so a
 # single blip does not nag the user.
