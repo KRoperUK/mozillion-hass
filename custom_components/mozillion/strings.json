@@ -63,6 +63,48 @@
       "reconfigure_successful": "Reconfiguration successful."
     }
   },
+  "config_subentries": {
+    "sim": {
+      "entry_type": "SIM",
+      "initiate_flow": {
+        "user": "Add a SIM",
+        "reconfigure": "Change SIM"
+      },
+      "step": {
+        "user": {
+          "title": "Add a SIM",
+          "description": "Choose another SIM on this account to track.",
+          "data": {
+            "sim": "SIM"
+          }
+        },
+        "manual_ids": {
+          "title": "Enter IDs Manually",
+          "description": "Enter the order detail ID and SIM meta ID for the SIM. Both are visible on the Mozillion dashboard's SIM selector.",
+          "data": {
+            "order_detail_id": "Order detail ID",
+            "sim_meta_id": "SIM meta ID",
+            "sim_number": "SIM number (optional)"
+          }
+        },
+        "reconfigure": {
+          "title": "Change SIM",
+          "description": "Pick a different SIM for this device. The device and its history are kept.",
+          "data": {
+            "sim": "SIM"
+          }
+        }
+      },
+      "error": {
+        "cannot_connect": "Could not reach Mozillion, or the SIM could not be confirmed. Check the connection and try again."
+      },
+      "abort": {
+        "entry_not_loaded": "The Mozillion account is not running, so a SIM cannot be added. Start the integration and try again.",
+        "no_new_sims": "Every SIM on this account is already tracked.",
+        "reconfigure_successful": "The SIM was changed."
+      }
+    }
+  },
   "options": {
     "step": {
       "init": {

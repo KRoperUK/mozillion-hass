@@ -63,6 +63,48 @@
       "reconfigure_successful": "Athchumrú déanta go rathúil."
     }
   },
+  "config_subentries": {
+    "sim": {
+      "entry_type": "SIM",
+      "initiate_flow": {
+        "user": "Cuir SIM leis",
+        "reconfigure": "Athraigh SIM"
+      },
+      "step": {
+        "user": {
+          "title": "Cuir SIM leis",
+          "description": "Roghnaigh SIM eile ar an gcuntas seo le faire.",
+          "data": {
+            "sim": "SIM"
+          }
+        },
+        "manual_ids": {
+          "title": "Iontráil IDanna de láimh",
+          "description": "Iontráil ID mhionsonraí an ordaithe agus ID meiteashonraí an SIM. Tá an dá cheann le feiceáil i roghnóir SIM an deais Mozillion.",
+          "data": {
+            "order_detail_id": "ID mhionsonraí an ordaithe",
+            "sim_meta_id": "ID meiteashonraí an SIM",
+            "sim_number": "Uimhir an SIM (roghnach)"
+          }
+        },
+        "reconfigure": {
+          "title": "Athraigh SIM",
+          "description": "Roghnaigh SIM eile don ghléas seo. Coinnítear an gléas agus a stair.",
+          "data": {
+            "sim": "SIM"
+          }
+        }
+      },
+      "error": {
+        "cannot_connect": "Níorbh fhéidir Mozillion a shroicheadh, nó níorbh fhéidir an SIM a dhearbhú. Seiceáil an nasc agus bain triail eile as."
+      },
+      "abort": {
+        "entry_not_loaded": "Níl cuntas Mozillion ag rith, mar sin ní féidir SIM a chur leis. Cuir tús leis an gcomhpháirt agus bain triail eile as.",
+        "no_new_sims": "Tá gach SIM ar an gcuntas seo á faire cheana féin.",
+        "reconfigure_successful": "Athraíodh an SIM."
+      }
+    }
+  },
   "options": {
     "step": {
       "init": {

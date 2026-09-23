@@ -63,6 +63,48 @@
       "reconfigure_successful": "Ailffurfweddu'n llwyddiannus."
     }
   },
+  "config_subentries": {
+    "sim": {
+      "entry_type": "SIM",
+      "initiate_flow": {
+        "user": "Ychwanegu SIM",
+        "reconfigure": "Newid SIM"
+      },
+      "step": {
+        "user": {
+          "title": "Ychwanegu SIM",
+          "description": "Dewiswch SIM arall ar y cyfrif hwn i'w thracio.",
+          "data": {
+            "sim": "SIM"
+          }
+        },
+        "manual_ids": {
+          "title": "Nodwch IDau â llaw",
+          "description": "Nodwch ID manylion yr archeb ac ID meta'r SIM. Mae'r ddau i'w gweld yn nosolydd SIM dangosfwrdd Mozillion.",
+          "data": {
+            "order_detail_id": "ID manylion yr archeb",
+            "sim_meta_id": "ID meta'r SIM",
+            "sim_number": "Rhif y SIM (dewisol)"
+          }
+        },
+        "reconfigure": {
+          "title": "Newid SIM",
+          "description": "Dewiswch SIM wahanol ar gyfer y ddyfais hon. Cedwir y ddyfais a'i hanes.",
+          "data": {
+            "sim": "SIM"
+          }
+        }
+      },
+      "error": {
+        "cannot_connect": "Methu cyrraedd Mozillion, neu methu cadarnhau'r SIM. Gwiriwch y cysylltiad a rhowch gynnig arall arni."
+      },
+      "abort": {
+        "entry_not_loaded": "Nid yw'r cyfrif Mozillion yn rhedeg, felly ni ellir ychwanegu SIM. Dechreuwch y gydran a rhowch gynnig arall arni.",
+        "no_new_sims": "Mae pob SIM ar y cyfrif hwn eisoes yn cael ei thracio.",
+        "reconfigure_successful": "Newidiwyd y SIM."
+      }
+    }
+  },
   "options": {
     "step": {
       "init": {
