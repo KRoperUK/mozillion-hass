@@ -143,10 +143,15 @@ async def _run() -> int:
         )
         if detail.port_status_description:
             print(f"    {detail.port_status_description}")
-        print(
-            f"  billing_amount={detail.billing_amount} "
-            f"has_bill={detail.has_bill} billing_days={detail.billing_days!r}"
-            f"  (no unit claimed; the page states none)"
+        # Checked, not printed: the billing fields are financial data, so the
+        # figures stay out of the log. What matters here is that they parse.
+        _check(
+            detail.billing_amount is None or isinstance(detail.billing_amount, float),
+            "billing_amount parsed as a number (not printed)",
+        )
+        _check(
+            isinstance(detail.has_bill, bool),
+            "has_bill parsed as a boolean (not printed)",
         )
 
         print("5. out-of-bundle wallet balance")

@@ -626,7 +626,10 @@ def _to_float(value: str | None) -> float | None:
     try:
         return float(value)
     except ValueError:
-        _LOGGER.debug("Ignoring non-numeric dashboard value %r", value)
+        # The value itself is deliberately not logged. It comes straight off the
+        # dashboard, and the lesson from this repository's own history is that a
+        # scraped field should not reach the log in clear text.
+        _LOGGER.debug("Ignoring a non-numeric dashboard value")
         return None
 
 
