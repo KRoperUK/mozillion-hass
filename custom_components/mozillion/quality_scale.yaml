@@ -1,10 +1,8 @@
 # Home Assistant Integration Quality Scale — self-assessment.
 #
 # hassfest only validates this file for core integrations; for a custom (HACS)
-# integration it is an honest status record. Every Bronze, Silver and Gold rule
-# is done or exempt. Platinum is not claimed: `strict-typing` cannot be met
-# while Home Assistant's own types are absent at type-check time, so the mypy
-# configuration relaxes the checks that are unsatisfiable for HA subclasses.
+# integration it is an honest status record. Every Bronze, Silver, Gold and
+# Platinum rule is done or exempt.
 rules:
   # --- Bronze ---
   action-setup:
@@ -177,9 +175,9 @@ rules:
     status: done
     comment: The Home Assistant shared aiohttp session is injected via async_get_clientsession.
   strict-typing:
-    status: todo
+    status: done
     comment: >-
-      mypy runs over the component but relaxes the checks that cannot be
-      satisfied while Home Assistant's own types are absent at check time
-      (homeassistant is a test-only dependency). Revisit once the HA types are
-      available to the type checker.
+      mypy runs with ``strict = true`` and no per-module overrides, and the
+      component contains no ``type: ignore``. Home Assistant's own types are
+      followed rather than skipped, so the check cannot degrade quietly: with the
+      homeassistant package off the path mypy reports errors instead of passing.
