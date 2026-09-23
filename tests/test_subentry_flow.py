@@ -27,6 +27,7 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntryState, ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from tests.conftest import (
@@ -64,7 +65,11 @@ def _client(sims: list[Any]) -> MagicMock:
         return_value=("mozillion_session=abc; XSRF-TOKEN=xyz", "xyz")
     )
     client.async_fetch_sims = AsyncMock(return_value=sims)
-    client.async_fetch_sim = AsyncMock(return_value=MOCK_SIM)
+    client.async_fetch_sim = AsyncMock(
+        side_effect=lambda sim_meta_id, **kwargs: next(
+            (sim for sim in sims if sim.sim_meta_id == sim_meta_id), MOCK_SIM
+        )
+    )
     client.async_fetch_overspend = AsyncMock(return_value=MOCK_WALLET)
     return client
 
@@ -341,3 +346,36 @@ async def test_reconfigure_moves_the_subentry_rather_than_adding_one(
     assert after.data[CONF_SIM_NUMBER] == SECOND_SIM.sim_number
     assert after.data[CONF_ICCID] == SECOND_SIM.iccid
     assert after.title == SECOND_SIM.display_name
+
+
+def _entity_ids(hass: HomeAssistant) -> set[str]:
+    return {state.entity_id for state in hass.states.async_all()}
+
+
+async def test_adding_a_sim_produces_its_entities(hass: HomeAssistant) -> None:
+    """The whole point of the subentry flow: a new SIM gets its own entities.
+
+    The flow only creates the subentry. Entities appear because the entry reloads
+    when its subentries change, so this is the end-to-end path a user sees, and
+    the one thing the rest of this file does not cover.
+    """
+
+    async with _account(hass, _client([MOCK_SIM, SECOND_SIM])) as entry:
+        before = _entity_ids(hass)
+
+        result = await _start_flow(hass, entry)
+        await hass.config_entries.subentries.async_configure(
+            result["flow_id"], {"sim": SECOND_SIM.display_name}
+        )
+        await hass.async_block_till_done()
+
+        devices = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
+
+    added = _entity_ids(hass) - before
+
+    assert added, "adding a SIM must create its entities, not just a subentry"
+    # Entity ids carry the device name, which carries the SIM's number.
+    assert any(SECOND_SIM.sim_number in entity_id for entity_id in added), sorted(added)
+    # The first SIM keeps its own entities, and each SIM gets its own device.
+    assert any(MOCK_SIM.sim_number in entity_id for entity_id in _entity_ids(hass))
+    assert len(devices) == 2, [device.name for device in devices]
