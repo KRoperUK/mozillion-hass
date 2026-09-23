@@ -64,6 +64,12 @@ from .entity import MozillionEntity
 # The wallet figures come from the dashboard's overspend endpoint. A SIM with no
 # wallet answers all zeros, so those entities report unavailable unless the
 # wallet is actually in use (see `wallet_is_active`).
+#
+# GBP is an assumption, not something the endpoint states: Mozillion is a UK
+# service and the site's own monetary attributes are in pounds, but the endpoint
+# gives no currency and no scale, and a never-topped-up wallet reads zero, so the
+# scale has never been checked against a real figure. Noted under known
+# limitations in docs/index.md.
 
 
 @dataclass(frozen=True, kw_only=True)

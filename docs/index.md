@@ -143,6 +143,12 @@ blueprint covers every SIM you add.
 
 ## Known limitations
 
+- **The wallet figures are assumed to be pounds.** Mozillion is a UK service and
+  the site's own monetary attributes are in pounds — `data-amount="10.00"` sits
+  beside a "wallet £10" label — but the overspend endpoint's `balance` and `spent`
+  state neither a currency nor a scale, and a wallet that has never been topped up
+  reads zero, so there has been nothing to check the scale against. If the figures
+  ever look 100x out, this is the assumption to question first.
 - **The billing figures are unverified.** `billing_amount` is passed through
   exactly as the page publishes it. The page states no currency and does not say
   whether the value is in pounds or pence, and the copy beside it only reads
