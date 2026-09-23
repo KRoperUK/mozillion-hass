@@ -86,11 +86,26 @@
       },
       "usage_percentage": {
         "name": "Céatadán úsáide"
+      },
+      "reset_date": {
+        "name": "Athshocrú sonraí"
+      },
+      "wallet_balance": {
+        "name": "Iarmhéid sparáin"
+      },
+      "wallet_spend": {
+        "name": "Caiteachas lasmuigh den phlean"
+      },
+      "sim_status": {
+        "name": "Stádas SIM"
       }
     },
     "binary_sensor": {
       "unlimited": {
         "name": "Gan teorainn"
+      },
+      "overspend_limit_reached": {
+        "name": "Teorainn róchaiteachais sroichte"
       }
     }
   }

@@ -86,11 +86,26 @@
       },
       "usage_percentage": {
         "name": "Usage Percentage"
+      },
+      "reset_date": {
+        "name": "Data resets"
+      },
+      "wallet_balance": {
+        "name": "Wallet balance"
+      },
+      "wallet_spend": {
+        "name": "Out-of-bundle spend"
+      },
+      "sim_status": {
+        "name": "SIM status"
       }
     },
     "binary_sensor": {
       "unlimited": {
         "name": "Unlimited"
+      },
+      "overspend_limit_reached": {
+        "name": "Overspend limit reached"
       }
     }
   }

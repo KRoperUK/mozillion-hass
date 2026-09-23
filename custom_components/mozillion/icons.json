@@ -3,6 +3,9 @@
     "binary_sensor": {
       "unlimited": {
         "default": "mdi:infinity"
+      },
+      "overspend_limit_reached": {
+        "default": "mdi:alert-octagon"
       }
     },
     "sensor": {
@@ -17,6 +20,18 @@
       },
       "usage_percentage": {
         "default": "mdi:percent"
+      },
+      "reset_date": {
+        "default": "mdi:calendar-refresh"
+      },
+      "wallet_balance": {
+        "default": "mdi:wallet"
+      },
+      "wallet_spend": {
+        "default": "mdi:cash-minus"
+      },
+      "sim_status": {
+        "default": "mdi:sim-alert"
       }
     }
   }

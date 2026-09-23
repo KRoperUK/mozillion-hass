@@ -33,6 +33,7 @@ sys.path.insert(0, str(ROOT))
 from custom_components.mozillion.api import (  # noqa: E402
     MozillionClient,
     MozillionSim,
+    parse_reset_date,
 )
 from custom_components.mozillion.const import DEFAULT_ORIGIN  # noqa: E402
 from custom_components.mozillion.coordinator import (  # noqa: E402
@@ -86,15 +87,15 @@ async def _run() -> int:
         sims = await client.async_fetch_sims(cookie_header=cookie, xsrf_token=xsrf)
         _check(bool(sims), f"dashboard lists {len(sims)} SIM(s)")
         for sim in sims:
-            _check(bool(sim.sim_meta_id), f"{sim.display_name} has a sim_meta_id")
+            _check(bool(sim.sim_meta_id), f"{_safe_name(sim)} has a sim_meta_id")
             _check(
                 bool(sim.order_detail_id),
-                f"{sim.display_name} has an order_detail_id",
+                f"{_safe_name(sim)} has an order_detail_id",
             )
             print(_describe(sim))
 
         sim = sims[0]
-        print(f"3. usage for {sim.display_name} (trigger + poll)")
+        print(f"3. usage for {_safe_name(sim)} (trigger + poll)")
         raw = await client.async_get_usage(
             order_detail_id=sim.order_detail_id,
             sim_meta_id=sim.sim_meta_id,
@@ -115,20 +116,74 @@ async def _run() -> int:
             f"unlimited={data['unlimited']}"
         )
 
+        print(f"4. dashboard detail for {_safe_name(sim)}")
+        detail = await client.async_fetch_sim(
+            sim_meta_id=sim.sim_meta_id, cookie_header=cookie, xsrf_token=xsrf
+        )
+        _check(
+            detail.sim_meta_id == sim.sim_meta_id,
+            f"read back the same SIM (status={detail.status!r})",
+        )
+        reset = parse_reset_date(detail.reset_label, detail.days_left)
+        _check(
+            reset is not None or not detail.reset_label,
+            f"reset label {detail.reset_label!r} parsed as {reset}",
+        )
+        print(
+            f"  plan={detail.plan_data_tariff!r} duration={detail.plan_duration!r} "
+            f"roaming={detail.plan_roaming!r}"
+        )
+
+        print("5. out-of-bundle wallet balance")
+        wallet = await client.async_fetch_overspend(
+            order_detail_id=sim.order_detail_id,
+            cookie_header=cookie,
+            xsrf_token=xsrf,
+        )
+        print(f"  {wallet}")
+        has_balance = (wallet.get("remaining") or 0) > 0
+        has_spend = (wallet.get("spent") or 0) > 0
+        active = bool(has_balance or has_spend)
+        print(
+            f"  wallet {'in use' if active else 'not topped up'} "
+            f"(entities report {'values' if active else 'unavailable'})"
+        )
+
     print("\nAll live checks passed.")
     return 0
 
 
+def _mask(value: str, keep: int = 3) -> str:
+    """Redact the middle of an identifier.
+
+    This script reads real account data, and its output is exactly what someone
+    pastes into a bug report, so the SIM number and ICCID are masked rather than
+    printed in full.
+    """
+
+    if not value:
+        return ""
+    if len(value) <= keep * 2:
+        return "*" * len(value)
+    return f"{value[:keep]}{'*' * (len(value) - keep * 2)}{value[-keep:]}"
+
+
 def _describe(sim: MozillionSim) -> str:
     return (
-        f"  {sim.display_name}: sim_meta_id={sim.sim_meta_id} "
-        f"order_detail_id={sim.order_detail_id} status={sim.status} "
+        f"  {_safe_name(sim)}: sim_meta_id={_mask(sim.sim_meta_id)} "
+        f"order_detail_id={_mask(sim.order_detail_id)} status={sim.status} "
         f"reset={sim.reset_label!r} "
         f"used={sim.used_data}/{sim.total_data} "
         f"gbr={sim.used_data_gbr}/{sim.total_data_gbr} "
         f"global={sim.used_data_global}/{sim.total_data_global} "
         f"unlimited={sim.is_unlimited}"
     )
+
+
+def _safe_name(sim: MozillionSim) -> str:
+    """The SIM's display name with the phone number masked."""
+
+    return sim.display_name.replace(sim.sim_number, _mask(sim.sim_number))
 
 
 def main() -> int:

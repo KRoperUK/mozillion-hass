@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,10 +13,12 @@ from custom_components.mozillion.api import (
     MozillionClient,
     _build_cookie_header,
     _extract_csrf,
+    parse_reset_date,
     parse_sims,
 )
 from custom_components.mozillion.const import (
     BASE_URL,
+    CHECK_BALANCE_PATH,
     DASHBOARD_PATH,
     DATA_USAGE_STATUS_PATH,
     USAGE_POLL_ATTEMPTS,
@@ -26,8 +29,8 @@ from yarl import URL
 # Helpers
 # ---------------------------------------------------------------------------
 
-# Trimmed from a real capture of /new-user-dashboard, keeping the multi-line
-# attribute layout so the parser is exercised against the real shape.
+# Modelled on a capture of /new-user-dashboard: same attribute layout and
+# multi-line shape, but every value is synthetic.
 DASHBOARD_HTML = """
 <html><body>
 <div id="sim-dropdown-menu">
@@ -646,3 +649,164 @@ class TestAsyncGetUsage:
                 sim_meta_id="7654321",
                 cookie_header="mozillion_session=abc",
             )
+
+
+# ---------------------------------------------------------------------------
+# MozillionClient.async_fetch_sim
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncFetchSim:
+    """Tests for reading a single SIM's dashboard detail."""
+
+    @pytest.mark.asyncio
+    async def test_returns_the_matching_sim(self) -> None:
+        session = _session(get_responses=(_response(text=DASHBOARD_HTML),))
+
+        client = MozillionClient(session)
+        sim = await client.async_fetch_sim(
+            sim_meta_id="7654321", cookie_header="mozillion_session=abc"
+        )
+
+        assert sim.sim_meta_id == "7654321"
+        assert sim.status == "ACTIVE"
+        assert sim.reset_label == "19 Oct"
+        assert sim.plan_data_tariff == "100GB"
+
+    @pytest.mark.asyncio
+    async def test_raises_when_the_sim_is_not_listed(self) -> None:
+        """A removed SIM must be reported, not silently ignored."""
+        session = _session(get_responses=(_response(text=DASHBOARD_HTML),))
+
+        client = MozillionClient(session)
+        with pytest.raises(RuntimeError, match="no longer listed"):
+            await client.async_fetch_sim(
+                sim_meta_id="99999", cookie_header="mozillion_session=abc"
+            )
+
+
+# ---------------------------------------------------------------------------
+# MozillionClient.async_fetch_overspend
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncFetchOverspend:
+    """Tests for the out-of-bundle wallet read."""
+
+    @pytest.mark.asyncio
+    async def test_returns_the_payload(self) -> None:
+        payload = {
+            "success": True,
+            "balance": 12.0,
+            "spent": 2.5,
+            "remaining": 9.5,
+            "reached": False,
+        }
+        session = _session(
+            get_responses=(
+                _response(json_data=payload, content_type="application/json"),
+            )
+        )
+
+        client = MozillionClient(session)
+        result = await client.async_fetch_overspend(
+            order_detail_id="1234567", cookie_header="mozillion_session=abc"
+        )
+
+        assert result == payload
+        assert session.get.call_args.kwargs["params"] == {"order_detail_id": "1234567"}
+        assert CHECK_BALANCE_PATH in session.get.call_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_unsuccessful_response_raises(self) -> None:
+        session = _session(
+            get_responses=(
+                _response(
+                    json_data={"success": False, "message": "No such order"},
+                    content_type="application/json",
+                ),
+            )
+        )
+
+        client = MozillionClient(session)
+        with pytest.raises(RuntimeError, match="No such order"):
+            await client.async_fetch_overspend(
+                order_detail_id="1234567", cookie_header="mozillion_session=abc"
+            )
+
+    @pytest.mark.asyncio
+    async def test_expired_session_raises_auth_error(self) -> None:
+        session = _session(
+            get_responses=(
+                _response(text="<html>login</html>", content_type="text/html"),
+            )
+        )
+
+        client = MozillionClient(session)
+        with pytest.raises(MozillionAuthError):
+            await client.async_fetch_overspend(
+                order_detail_id="1234567", cookie_header="mozillion_session=abc"
+            )
+
+
+# ---------------------------------------------------------------------------
+# parse_reset_date
+# ---------------------------------------------------------------------------
+
+
+class TestParseResetDate:
+    """The reset label has no year, so the next occurrence is inferred."""
+
+    def test_label_later_this_year(self) -> None:
+        assert parse_reset_date("19 Oct", today=date(2026, 9, 21)) == date(2026, 10, 19)
+
+    def test_label_already_passed_rolls_to_next_year(self) -> None:
+        assert parse_reset_date("19 Aug", today=date(2026, 9, 21)) == date(2027, 8, 19)
+
+    def test_label_on_today_is_kept(self) -> None:
+        assert parse_reset_date("21 Sep", today=date(2026, 9, 21)) == date(2026, 9, 21)
+
+    def test_full_month_name(self) -> None:
+        assert parse_reset_date("19 October", today=date(2026, 9, 21)) == date(
+            2026, 10, 19
+        )
+
+    def test_explicit_year_is_honoured(self) -> None:
+        assert parse_reset_date("19 Oct 2028", today=date(2026, 9, 21)) == date(
+            2028, 10, 19
+        )
+
+    def test_day_count_wins_over_the_label(self) -> None:
+        """data-days-left is exact where the label is a guess."""
+        assert parse_reset_date("19 Oct", "5", today=date(2026, 9, 21)) == date(
+            2026, 9, 26
+        )
+
+    def test_numeric_day_count_with_padding(self) -> None:
+        assert parse_reset_date(None, " 30 ", today=date(2026, 9, 21)) == date(
+            2026, 10, 21
+        )
+
+    def test_bad_day_count_falls_back_to_the_label(self) -> None:
+        assert parse_reset_date("19 Oct", "soon", today=date(2026, 9, 21)) == date(
+            2026, 10, 19
+        )
+
+    def test_missing_everything(self) -> None:
+        assert parse_reset_date(None, today=date(2026, 9, 21)) is None
+
+    def test_empty_label(self) -> None:
+        assert parse_reset_date("   ", today=date(2026, 9, 21)) is None
+
+    def test_unparseable_label(self) -> None:
+        assert parse_reset_date("whenever", today=date(2026, 9, 21)) is None
+
+    def test_unknown_month(self) -> None:
+        assert parse_reset_date("19 Foo", today=date(2026, 9, 21)) is None
+
+    def test_impossible_day(self) -> None:
+        assert parse_reset_date("31 Feb", today=date(2026, 9, 21)) is None
+
+    def test_leap_day_without_a_next_leap_year(self) -> None:
+        """29 February exists in 2024 but not 2025, so give up rather than guess."""
+        assert parse_reset_date("29 Feb", today=date(2024, 3, 1)) is None

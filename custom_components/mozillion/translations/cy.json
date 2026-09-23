@@ -86,11 +86,26 @@
       },
       "usage_percentage": {
         "name": "Canran y defnydd"
+      },
+      "reset_date": {
+        "name": "Ailosod data"
+      },
+      "wallet_balance": {
+        "name": "Balans waled"
+      },
+      "wallet_spend": {
+        "name": "Gwariant y tu allan i'r pecyn"
+      },
+      "sim_status": {
+        "name": "Statws SIM"
       }
     },
     "binary_sensor": {
       "unlimited": {
         "name": "Diderfyn"
+      },
+      "overspend_limit_reached": {
+        "name": "Wedi cyrraedd y terfyn gorwario"
       }
     }
   }

@@ -15,6 +15,7 @@ import binascii
 import logging
 import re
 from dataclasses import dataclass
+from datetime import date, timedelta
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -24,6 +25,7 @@ from yarl import URL
 
 from .const import (
     BASE_URL,
+    CHECK_BALANCE_PATH,
     DASHBOARD_PATH,
     DATA_USAGE_PATH,
     DATA_USAGE_STATUS_PATH,
@@ -240,6 +242,59 @@ class MozillionClient:
             "changed, or the account has no active SIMs."
         )
 
+    async def async_fetch_sim(
+        self,
+        sim_meta_id: str,
+        cookie_header: str,
+        xsrf_token: str | None = None,
+    ) -> MozillionSim:
+        """Fetch the dashboard and return the one SIM with this meta id.
+
+        The dashboard carries the plan, reset date and service status that the
+        JSON usage endpoints do not expose.
+        """
+
+        sims = await self.async_fetch_sims(
+            cookie_header=cookie_header, xsrf_token=xsrf_token
+        )
+        for sim in sims:
+            if sim.sim_meta_id == sim_meta_id:
+                return sim
+
+        raise RuntimeError(
+            f"SIM {sim_meta_id} is no longer listed on the Mozillion dashboard; "
+            "it may have been removed from the account"
+        )
+
+    # ------------------------------------------------------------------
+    # Out-of-bundle wallet
+    # ------------------------------------------------------------------
+
+    async def async_fetch_overspend(
+        self,
+        order_detail_id: str,
+        cookie_header: str,
+        xsrf_token: str | None = None,
+    ) -> dict[str, Any]:
+        """Read the out-of-bundle wallet position for an order.
+
+        This is the call the dashboard's own wallet refresh button makes. It
+        answers ``{"success": true, "balance": …, "spent": …, "remaining": …,
+        "reached": …}``.
+        """
+
+        payload = await self._async_get_json(
+            f"{BASE_URL}{CHECK_BALANCE_PATH}",
+            headers=self._api_headers(cookie_header, xsrf_token),
+            params={"order_detail_id": order_detail_id},
+        )
+
+        if not payload.get("success"):
+            raise RuntimeError(
+                str(payload.get("message") or "Mozillion rejected the balance check")
+            )
+        return payload
+
     # ------------------------------------------------------------------
     # Data usage
     # ------------------------------------------------------------------
@@ -432,6 +487,81 @@ def _looks_like_login_page(html: str) -> bool:
     """Return True when the HTML is Mozillion's login page."""
 
     return 'name="password"' in html or LOGIN_POST_PATH in html
+
+
+# Mozillion renders the reset label in English, e.g. "19 Oct" or "19 Oct 2026".
+_RESET_LABEL_RE = re.compile(r"^(\d{1,2})\s+([A-Za-z]+)(?:\s+(\d{4}))?$")
+_MONTHS = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+
+
+def parse_reset_date(
+    label: str | None, days_left: str | None = None, today: date | None = None
+) -> date | None:
+    """Work out the next data reset date from the dashboard's markup.
+
+    The dashboard gives either a day count (``data-days-left``) or a day/month
+    label such as ``"19 Oct"``. A day count is exact, so it wins. The label has
+    no year, so the next occurrence is assumed -- a reset date is always in the
+    future by definition. Both of those inferences are ours, not Mozillion's;
+    the raw label is exposed alongside so the original is always visible.
+
+    The month names are matched against an English table rather than
+    ``strptime``: the markup is server-rendered in English, and strptime warns
+    that a year-less parse is ambiguous (Python 3.14 deprecation).
+    """
+
+    today = today or date.today()
+
+    if days_left:
+        try:
+            return today + timedelta(days=int(days_left.strip()))
+        except ValueError:
+            _LOGGER.debug("Ignoring non-numeric data-days-left %r", days_left)
+
+    if not label:
+        return None
+
+    match = _RESET_LABEL_RE.match(label.strip())
+    if match is None:
+        _LOGGER.debug("Could not interpret the reset label %r", label)
+        return None
+
+    day_text, month_text, year_text = match.groups()
+    month = _MONTHS.get(month_text[:3].lower())
+    if month is None:
+        _LOGGER.debug("Unknown month %r in the reset label", month_text)
+        return None
+
+    year = int(year_text) if year_text else today.year
+    try:
+        candidate = date(year, month, int(day_text))
+    except ValueError:
+        _LOGGER.debug("Invalid day in the reset label %r", label)
+        return None
+
+    if year_text or candidate >= today:
+        return candidate
+
+    # The reset for this year has been and gone, so it must be the next one.
+    try:
+        return candidate.replace(year=candidate.year + 1)
+    except ValueError:
+        # 29 February: the following year has no such day.
+        _LOGGER.debug("Cannot move %s into the next year", candidate)
+        return None
 
 
 def _to_float(value: str | None) -> float | None:

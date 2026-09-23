@@ -86,11 +86,26 @@
       },
       "usage_percentage": {
         "name": "Pourcentage utilisé"
+      },
+      "reset_date": {
+        "name": "Réinitialisation des données"
+      },
+      "wallet_balance": {
+        "name": "Solde du portefeuille"
+      },
+      "wallet_spend": {
+        "name": "Dépenses hors forfait"
+      },
+      "sim_status": {
+        "name": "État de la SIM"
       }
     },
     "binary_sensor": {
       "unlimited": {
         "name": "Illimité"
+      },
+      "overspend_limit_reached": {
+        "name": "Limite de dépassement atteinte"
       }
     }
   }
