@@ -608,11 +608,17 @@ class SimSubentryFlowHandler(ConfigSubentryFlow):
             _LOGGER.exception("Could not read the Mozillion SIM list")
             return await self.async_step_manual_ids()
 
+        # Only a reconfigure flow has a subentry to exclude. Reading
+        # `_reconfigure_subentry_id` unconditionally raised
+        #   ValueError: Source is user, expected reconfigure
+        # on the add-a-SIM path, so an account with any SIM could never gain
+        # another.
+        reconfigure_id = self._reconfigure_subentry_id if reconfigure else None
         tracked = {
             subentry.data.get(CONF_SIM_META_ID)
             for subentry in entry.subentries.values()
             if subentry.subentry_type == SUBENTRY_TYPE_SIM
-            and subentry.subentry_id != self._reconfigure_subentry_id
+            and subentry.subentry_id != reconfigure_id
         }
         choices = _sim_choices(sims, taken={t for t in tracked if t})
         if not choices:
@@ -628,8 +634,13 @@ class SimSubentryFlowHandler(ConfigSubentryFlow):
             else:
                 errors["base"] = "cannot_connect"
 
+        # The step id decides where HA routes the submitted form, so it has to
+        # match the step that was actually entered. Reporting "user" from the
+        # reconfigure path sent the submission to async_step_user, which finished
+        # by calling async_create_entry -- and HA rejects that for a reconfigure
+        # flow with "ValueError: Source is reconfigure, expected user".
         return self.async_show_form(
-            step_id="user",
+            step_id="reconfigure" if reconfigure else "user",
             data_schema=vol.Schema({vol.Required("sim"): vol.In(list(choices))}),
             errors=errors,
         )
