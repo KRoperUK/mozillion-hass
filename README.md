@@ -61,6 +61,9 @@ Add the integration and choose one of:
 You then pick your SIM from a dropdown. The scan interval defaults to one hour
 and is configurable through the integration's options.
 
+Two blueprints ship with the integration — **data running low** and **overspend limit
+reached** — importable from *Settings → Automations & Scenes → Blueprints*.
+
 Full details: [installation](docs/installation.md) ·
 [use cases, entities and examples](docs/index.md) ·
 [troubleshooting](docs/TROUBLESHOOTING.md).

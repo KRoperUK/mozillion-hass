@@ -110,6 +110,19 @@ entities:
 > Entity ids depend on the device name, which is the SIM's phone number. Check
 > *Settings → Devices & Services → Mozillion* for the exact ids.
 
+### Blueprints
+
+Rather than writing the automation yourself, two blueprints ship in this repository.
+Import them from *Settings → Automations & Scenes → Blueprints → Import Blueprint*:
+
+| Blueprint | Import URL |
+| --- | --- |
+| Data running low | `https://github.com/KRoperUK/mozillion-hass/blob/main/blueprints/automation/mozillion/data_running_low.yaml` |
+| Overspend limit reached | `https://github.com/KRoperUK/mozillion-hass/blob/main/blueprints/automation/mozillion/overspend_limit_reached.yaml` |
+
+Both take the relevant entity for the SIM plus the notify action to call, so one
+blueprint covers every SIM you add.
+
 ## Known limitations
 
 - **The per-bucket figures are unverified.** Mozillion returns `usedData`/
