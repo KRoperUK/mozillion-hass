@@ -1,0 +1,54 @@
+blueprint:
+  name: Mozillion overspend limit reached
+  description: >-
+    Notify when a Mozillion SIM's out-of-bundle (wallet) limit is reached, so you
+    know spend outside the plan has stopped rather than assuming it is still
+    running.
+
+    The wallet only reports for a SIM that has been topped up. On a SIM with no
+    wallet the binary sensor is unavailable and this automation stays quiet.
+  domain: automation
+  homeassistant:
+    min_version: "2026.6.0"
+  input:
+    overspend_limit_entity:
+      name: Overspend limit reached sensor
+      description: >-
+        The Mozillion "Overspend limit reached" binary sensor for the SIM to watch.
+      selector:
+        entity:
+          domain: binary_sensor
+          integration: mozillion
+    notify_service:
+      name: Notify action
+      description: >-
+        The notify action to call, for example `notify.mobile_app_phone` or
+        `notify.persistent_notification`.
+      selector:
+        text:
+    title:
+      name: Notification title
+      default: Mozillion overspend limit reached
+      selector:
+        text:
+    message:
+      name: Notification message
+      default: >-
+        Spend outside the plan has reached the wallet limit. Top up to allow
+        out-of-bundle usage again.
+      selector:
+        text:
+          multiline: true
+
+triggers:
+  - trigger: state
+    entity_id: !input overspend_limit_entity
+    to: "on"
+
+actions:
+  - action: !input notify_service
+    data:
+      title: !input title
+      message: !input message
+
+mode: single

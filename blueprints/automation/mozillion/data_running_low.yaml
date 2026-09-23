@@ -1,0 +1,68 @@
+blueprint:
+  name: Mozillion data running low
+  description: >-
+    Notify when a Mozillion SIM has used more than a set share of its data
+    allowance, so there is time to act before it runs out.
+
+    The integration polls on its own schedule — one hour by default — so this can
+    lag real usage by up to one scan interval. Two things it cannot see: Mozillion
+    regenerates the figures on demand, and the allowance shown is not the
+    allowance usable in the EU, which is capped separately.
+  domain: automation
+  homeassistant:
+    min_version: "2026.6.0"
+  input:
+    usage_percentage_entity:
+      name: Usage percentage sensor
+      description: >-
+        The Mozillion "Usage Percentage" sensor for the SIM to watch — the one
+        whose value is a percentage, not the sensor in GB.
+      selector:
+        entity:
+          domain: sensor
+          integration: mozillion
+    threshold:
+      name: Warn at this percentage
+      description: The notification fires when usage first passes this value.
+      default: 90
+      selector:
+        number:
+          min: 1
+          max: 100
+          unit_of_measurement: "%"
+          mode: slider
+    notify_service:
+      name: Notify action
+      description: >-
+        The notify action to call, for example `notify.mobile_app_phone` or
+        `notify.persistent_notification`.
+      selector:
+        text:
+    title:
+      name: Notification title
+      default: Mozillion data running low
+      selector:
+        text:
+    message:
+      name: Notification message
+      description: >-
+        Template for the notification body. `trigger.to_state` is the usage
+        percentage sensor at the moment it crossed the threshold.
+      default: >-
+        Data used is now {{ trigger.to_state.state }}% of the allowance.
+      selector:
+        text:
+          multiline: true
+
+triggers:
+  - trigger: numeric_state
+    entity_id: !input usage_percentage_entity
+    above: !input threshold
+
+actions:
+  - action: !input notify_service
+    data:
+      title: !input title
+      message: !input message
+
+mode: single
