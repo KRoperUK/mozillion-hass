@@ -634,8 +634,13 @@ class SimSubentryFlowHandler(ConfigSubentryFlow):
             else:
                 errors["base"] = "cannot_connect"
 
+        # The step id decides where HA routes the submitted form, so it has to
+        # match the step that was actually entered. Reporting "user" from the
+        # reconfigure path sent the submission to async_step_user, which finished
+        # by calling async_create_entry -- and HA rejects that for a reconfigure
+        # flow with "ValueError: Source is reconfigure, expected user".
         return self.async_show_form(
-            step_id="user",
+            step_id="reconfigure" if reconfigure else "user",
             data_schema=vol.Schema({vol.Required("sim"): vol.In(list(choices))}),
             errors=errors,
         )

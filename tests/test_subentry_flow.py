@@ -278,3 +278,66 @@ async def test_the_flow_refuses_an_entry_that_is_not_loaded(
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "entry_not_loaded"
+
+
+async def _start_reconfigure(
+    hass: HomeAssistant, entry: MockConfigEntry, subentry: ConfigSubentry
+) -> dict[str, Any]:
+    """Start a reconfigure flow for one subentry, the way the UI does."""
+
+    return await hass.config_entries.subentries.async_init(
+        (entry.entry_id, SUBENTRY_TYPE_SIM),
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "subentry_id": subentry.subentry_id,
+        },
+    )
+
+
+async def test_reconfigure_offers_every_sim_including_the_current_one(
+    hass: HomeAssistant,
+) -> None:
+    """The reconfigure form lists every SIM, the current one included.
+
+    The subentry being reconfigured is left out of the "already tracked" set, so
+    the SIM it already points at stays selectable -- picking it re-validates and
+    rewrites the same data rather than moving the subentry.
+    """
+
+    async with _account(hass, _client([MOCK_SIM, SECOND_SIM])) as entry:
+        result = await _start_reconfigure(hass, entry, sim_subentry(entry))
+
+    assert result["type"] is FlowResultType.FORM
+    # The step id is load-bearing, not cosmetic: HA routes the submitted form by
+    # it, so reporting "user" here sent the submission to the wrong step.
+    assert result["step_id"] == "reconfigure"
+    assert _offered_sims(result) == [
+        MOCK_SIM.display_name,
+        SECOND_SIM.display_name,
+    ]
+
+
+async def test_reconfigure_moves_the_subentry_rather_than_adding_one(
+    hass: HomeAssistant,
+) -> None:
+    """Reconfigure updates in place, so entity history is not orphaned."""
+
+    async with _account(hass, _client([MOCK_SIM, SECOND_SIM])) as entry:
+        before = sim_subentry(entry)
+        subentry_id = before.subentry_id
+
+        result = await _start_reconfigure(hass, entry, before)
+        result = await hass.config_entries.subentries.async_configure(
+            result["flow_id"], {"sim": SECOND_SIM.display_name}
+        )
+        await hass.async_block_till_done()
+
+        after = entry.subentries[subentry_id]
+
+    assert result["type"] is FlowResultType.ABORT
+    # Same subentry, new SIM: the account still has exactly one SIM subentry.
+    assert len(_sim_subentries(entry)) == 1
+    assert after.data[CONF_ORDER_DETAIL_ID] == SECOND_SIM.order_detail_id
+    assert after.data[CONF_SIM_NUMBER] == SECOND_SIM.sim_number
+    assert after.data[CONF_ICCID] == SECOND_SIM.iccid
+    assert after.title == SECOND_SIM.display_name
