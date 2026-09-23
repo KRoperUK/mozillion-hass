@@ -44,7 +44,9 @@ from custom_components.mozillion.const import (
     CONF_SIM_META_ID,
     CONF_TOTP_SECRET,
     CONF_XSRF_TOKEN,
+    DASHBOARD_REFRESH_INTERVAL,
     DEFAULT_ORIGIN,
+    REPAIR_FAILURE_THRESHOLD,
 )
 from custom_components.mozillion.coordinator import wallet_is_active
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -107,9 +109,7 @@ def _make_coordinator_for_entry(
     coordinator.password = entry.data.get(CONF_PASSWORD)
     coordinator.totp_secret = entry.data.get(CONF_TOTP_SECRET) or None
     coordinator.origin = entry.data.get(CONF_ORIGIN, DEFAULT_ORIGIN)
-    coordinator._auth_time = None
-    coordinator._dashboard_failures = 0
-    coordinator._dashboard_repair_active = False
+    coordinator._reset_poll_state()
     coordinator.hass = hass
     return coordinator
 
@@ -581,3 +581,59 @@ class TestWalletIsActive:
 
     def test_unread_wallet_is_inactive(self) -> None:
         assert wallet_is_active({ATTR_WALLET: None}) is False
+
+
+class TestDashboardCache:
+    """The 355 KB dashboard page is not re-read on every poll.
+
+    Plan, service status and reset date change slowly, so the page has its own
+    cadence while usage and the wallet keep the full poll interval.
+    """
+
+    async def test_second_poll_reuses_the_cached_detail(self) -> None:
+        client = _client()
+        coordinator = _make_coordinator(client)
+
+        await coordinator._async_update_data()
+        await coordinator._async_update_data()
+
+        assert client.async_fetch_sim.await_count == 1
+        # ...while the cheap JSON calls still happen every cycle.
+        assert client.async_get_usage.await_count == 2
+        assert client.async_fetch_overspend.await_count == 2
+
+    async def test_detail_is_refreshed_once_the_interval_passes(self) -> None:
+        client = _client()
+        coordinator = _make_coordinator(client)
+
+        await coordinator._async_update_data()
+        coordinator._sim_detail_at = time.monotonic() - (DASHBOARD_REFRESH_INTERVAL + 1)
+        await coordinator._async_update_data()
+
+        assert client.async_fetch_sim.await_count == 2
+
+    async def test_failed_refresh_keeps_the_last_reading(self) -> None:
+        """One bad refresh must not blank the plan, status and reset entities."""
+        client = _client()
+        coordinator = _make_coordinator(client)
+        await coordinator._async_update_data()
+
+        client.async_fetch_sim.side_effect = RuntimeError("markup changed")
+        coordinator._sim_detail_at = time.monotonic() - (DASHBOARD_REFRESH_INTERVAL + 1)
+        result = await coordinator._async_update_data()
+
+        assert result[ATTR_SIM_STATUS] == "ACTIVE"
+        assert coordinator._dashboard_failures == 1
+
+    async def test_cached_polls_do_not_inflate_the_failure_count(self) -> None:
+        """Only refresh attempts count, or a broken page would trip the repair
+        on the strength of polls that never tried to read it."""
+        client = _client()
+        coordinator = _make_coordinator(client)
+        await coordinator._async_update_data()
+
+        client.async_fetch_sim.side_effect = RuntimeError("markup changed")
+        for _ in range(REPAIR_FAILURE_THRESHOLD + 1):
+            await coordinator._async_update_data()
+
+        assert coordinator._dashboard_failures == 0

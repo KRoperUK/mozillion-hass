@@ -146,6 +146,7 @@ def _coordinator(hass: HomeAssistant) -> tuple[MozillionCoordinator, AsyncMock]:
         xsrf_header="xyz",
         update_interval=None,
     )
+    coordinator._reset_poll_state()
     return coordinator, client
 
 
