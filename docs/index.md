@@ -56,6 +56,12 @@ Each poll is two steps, because Mozillion regenerates the figures server-side:
    polled (up to 5 attempts, 3 seconds apart, the same cadence the dashboard
    uses) until it returns `{"status": "success", …}` with the figures.
 
+The plan, SIM service status and data reset date come from a 355 KB dashboard page
+rather than an endpoint. None of them change hourly (the reset label is monthly), so
+that page is refreshed every **6 hours** while the small JSON calls keep the full poll
+interval. The last good reading is kept if a refresh fails, and three failed refreshes
+in a row raise a repair.
+
 If the session has expired the integration logs in again and retries once.
 Credentials that are actually rejected raise a re-authentication prompt rather
 than retrying forever. A network failure leaves the previous values in place and
@@ -117,6 +123,12 @@ entities:
   order detail id and SIM meta id.
 - **A cookie-only entry cannot renew itself.** When the session expires you are
   asked to re-authenticate; supply email/password to get transparent renewal.
+- **Your plan's allowance is not the allowance you can use abroad.** Mozillion caps
+  how much of a plan's data can be used in the EU, and that cap varies by plan and is
+  not exposed by the dashboard page or the usage endpoints. `Remaining` therefore
+  reflects the plan's own allowance, not your remaining roaming data — check
+  [Mozillion's roaming guidance](https://www.mozillion.com/resources/help/roaming-travel/)
+  before relying on it while abroad.
 - **Usage figures refresh as often as Mozillion regenerates them.** Polling more
   often than the provider updates will not produce new numbers.
 - **This integration is unofficial** and is not affiliated with Mozillion.
