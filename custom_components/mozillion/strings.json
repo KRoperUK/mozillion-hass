@@ -138,6 +138,9 @@
       "wallet_spend": {
         "name": "Out-of-bundle spend"
       },
+      "port_status": {
+        "name": "Number port status"
+      },
       "sim_status": {
         "name": "SIM status"
       }

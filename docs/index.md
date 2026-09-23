@@ -38,11 +38,26 @@ reach `www.mozillion.com`.
 | Total | sensor | GB | Data allowance for the period |
 | Remaining | sensor | GB | `Total − Usage`, never negative |
 | Usage Percentage | sensor | % | `Usage ÷ Total`, capped at 100 |
+| Data resets | sensor | date | When the allowance next resets |
+| Wallet balance | sensor | GBP | Out-of-bundle balance |
+| Out-of-bundle spend | sensor | GBP | Spend outside the plan this period |
+| Number port status | sensor | — | Whether your number has been transferred, in Mozillion's own words |
+| SIM status | sensor | — | The service status Mozillion reports, usually `ACTIVE` |
 | Unlimited | binary sensor | — | On when the plan has no data cap |
+| Overspend limit reached | binary sensor | — | On when spend outside the plan hits the wallet limit |
 
-Each of the four sensors also exposes the raw API payload and a per-bucket
-breakdown (`usage_gbr` / `total_gbr`, `usage_global` / `total_global`) as
-attributes. See [Known limitations](#known-limitations).
+The wallet figures and the port status are **unavailable** rather than misleading
+when they have nothing to say: a SIM with no wallet answers all zeros with
+`reached: true`, and a SIM whose number was never ported reports no status.
+
+The SIM status sensor carries the rest of what the dashboard publishes as
+attributes: the plan (`plan_tariff`, `plan_duration`, `plan_roaming`,
+`plan_texts_minutes`, `plan_is_data_only`, `plan_voicemail`,
+`plan_parental_control`), the porting detail (`port_status`,
+`port_status_description`, `port_date`), the billing fields (`billing_amount`,
+`has_bill`, `billing_days`), and the raw payload. The four usage sensors also
+expose a per-bucket breakdown (`usage_gbr` / `total_gbr`, `usage_global` /
+`total_global`). See [Known limitations](#known-limitations).
 
 ## Data updates
 
@@ -76,6 +91,8 @@ the entities go unavailable until the next successful poll.
 - **Log the trend** — the sensors use the `measurement` state class, so they
   work with the Statistics and History dashboards.
 - **Track an unused SIM** — get told if a spare SIM starts consuming data.
+- **Watch a number port finish** — the port status sensor follows Mozillion's own
+  status from pending to done, so you know when to swap the SIM into your phone.
 
 ## Examples
 
@@ -126,6 +143,11 @@ blueprint covers every SIM you add.
 
 ## Known limitations
 
+- **The billing figures are unverified.** `billing_amount` is passed through
+  exactly as the page publishes it. The page states no currency and does not say
+  whether the value is in pounds or pence, and the copy beside it only reads
+  "Paid in full / No upcoming bill", so it is exposed as a raw attribute and no
+  unit is claimed.
 - **The per-bucket figures are unverified.** Mozillion returns `usedData`/
   `totalData` alongside `usedDataGbr`/`totalDataGbr` and `usedDataGlobal`/
   `totalDataGlobal`. The headline pair drives the sensors because that is what

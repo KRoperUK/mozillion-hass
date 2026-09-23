@@ -76,6 +76,21 @@ class MozillionSim:
     plan_roaming: str = ""
     plan_texts_minutes: str = ""
     plan_is_data_only: bool = False
+    plan_voicemail: bool = False
+    plan_parental_control: bool = False
+    # Number porting. The status is a machine value (DONE, and whatever else
+    # Mozillion uses); the label and description are the page's own wording, so
+    # the integration never has to invent an enum it has not seen.
+    port_status: str = ""
+    port_status_label: str = ""
+    port_status_description: str = ""
+    port_date: str = ""
+    # Billing. `billing_amount` is passed through raw: the page does not state a
+    # currency or unit, and the adjacent copy only says "Paid in full / No
+    # upcoming bill", so no unit is claimed here.
+    billing_amount: float | None = None
+    has_bill: bool = False
+    billing_days: str = ""
 
     @property
     def display_name(self) -> str:
@@ -480,6 +495,19 @@ def parse_sims(html: str) -> list[MozillionSim]:
                 plan_roaming=attrs.get("data-plan-roaming", "").strip(),
                 plan_texts_minutes=attrs.get("data-plan-texts-minutes", "").strip(),
                 plan_is_data_only=_to_bool(attrs.get("data-plan-is-data-only")),
+                plan_voicemail=_to_bool(attrs.get("data-plan-settings-voicemail")),
+                plan_parental_control=_to_bool(
+                    attrs.get("data-plan-settings-parental-control")
+                ),
+                port_status=attrs.get("data-port-status", "").strip(),
+                port_status_label=attrs.get("data-port-status-label", "").strip(),
+                port_status_description=attrs.get(
+                    "data-port-status-description", ""
+                ).strip(),
+                port_date=attrs.get("data-existing-port-date", "").strip(),
+                billing_amount=_to_float(attrs.get("data-billing-amount")),
+                has_bill=_to_bool(attrs.get("data-has-bill")),
+                billing_days=attrs.get("data-billing-days", "").strip(),
             )
         )
     return sims

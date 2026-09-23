@@ -131,7 +131,22 @@ async def _run() -> int:
         )
         print(
             f"  plan={detail.plan_data_tariff!r} duration={detail.plan_duration!r} "
-            f"roaming={detail.plan_roaming!r}"
+            f"roaming={detail.plan_roaming!r} texts={detail.plan_texts_minutes!r}"
+        )
+        print(
+            f"  voicemail={detail.plan_voicemail} "
+            f"parental_control={detail.plan_parental_control}"
+        )
+        print(
+            f"  port_status={detail.port_status!r} "
+            f"label={detail.port_status_label!r} date={detail.port_date!r}"
+        )
+        if detail.port_status_description:
+            print(f"    {detail.port_status_description}")
+        print(
+            f"  billing_amount={detail.billing_amount} "
+            f"has_bill={detail.has_bill} billing_days={detail.billing_days!r}"
+            f"  (no unit claimed; the page states none)"
         )
 
         print("5. out-of-bundle wallet balance")

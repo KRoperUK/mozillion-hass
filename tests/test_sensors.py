@@ -15,6 +15,8 @@ from custom_components.mozillion.binary_sensor import (
 from custom_components.mozillion.const import (
     ATTR_ICCID,
     ATTR_OVERSPEND_LIMIT_REACHED,
+    ATTR_PORT_STATUS,
+    ATTR_PORT_STATUS_LABEL,
     ATTR_RAW,
     ATTR_REMAINING,
     ATTR_RESET_DATE,
@@ -114,6 +116,7 @@ class TestSensorDescriptions:
             ATTR_RESET_DATE,
             ATTR_WALLET_BALANCE,
             ATTR_WALLET_SPEND,
+            ATTR_PORT_STATUS,
             ATTR_SIM_STATUS,
         ]
 
@@ -144,9 +147,36 @@ class TestSensorDescriptions:
         desc = next(desc for desc in DATA_SENSORS if desc.key == ATTR_SIM_STATUS)
         assert desc.entity_category == EntityCategory.DIAGNOSTIC
 
-    def test_only_the_wallet_sensors_are_conditional(self) -> None:
+    def test_only_the_sometimes_meaningless_sensors_are_conditional(self) -> None:
+        """Every entity is available by default.
+
+        Only the figures that a SIM may legitimately not have are guarded: a
+        wallet that was never topped up answers all zeros, and a SIM whose number
+        was never ported reports no port status.
+        """
+
         conditional = {d.key for d in DATA_SENSORS if d.available_fn is not None}
-        assert conditional == {ATTR_WALLET_BALANCE, ATTR_WALLET_SPEND}
+        assert conditional == {
+            ATTR_WALLET_BALANCE,
+            ATTR_WALLET_SPEND,
+            ATTR_PORT_STATUS,
+        }
+
+    def test_port_status_shows_the_pages_own_wording(self) -> None:
+        """The label is shown, the raw status stays in the attributes.
+
+        Mozillion uses status values this integration has not seen, so inventing
+        an enum would be guesswork.
+        """
+
+        desc = next(desc for desc in DATA_SENSORS if desc.key == ATTR_PORT_STATUS)
+
+        assert (
+            desc.value_fn({ATTR_PORT_STATUS: "DONE", ATTR_PORT_STATUS_LABEL: "Done"})
+            == "Done"
+        )
+        assert desc.value_fn({ATTR_PORT_STATUS: "PENDING"}) == "PENDING"
+        assert desc.value_fn({}) is None
 
     def test_keys_are_unique(self) -> None:
         keys = [desc.key for desc in DATA_SENSORS]

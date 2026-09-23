@@ -138,6 +138,9 @@
       "wallet_spend": {
         "name": "Dépenses hors forfait"
       },
+      "port_status": {
+        "name": "Statut du transfert de numéro"
+      },
       "sim_status": {
         "name": "État de la SIM"
       }

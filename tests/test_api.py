@@ -54,6 +54,11 @@ DASHBOARD_HTML = """
         data-plan-texts-minutes="Unlimited calls and texts"
         data-plan-is-data-only="0"
         data-plan-roaming="EU roaming in 41 countries"
+        data-plan-settings-voicemail="1"
+        data-plan-settings-parental-control="0"
+        data-port-status="DONE" data-port-status-label="Done"
+        data-port-status-description="Your number has been successfully transferred."
+        data-existing-port-date="29-12-2025"
         aria-selected="true">
         <span>Your SIM</span>
     </button>
@@ -227,6 +232,16 @@ class TestParseSims:
         assert sim.plan_data_tariff == "100GB"
         assert sim.plan_roaming == "EU roaming in 41 countries"
         assert sim.plan_is_data_only is False
+        assert sim.plan_voicemail is True
+        assert sim.plan_parental_control is False
+        assert sim.port_status == "DONE"
+        assert sim.port_status_label == "Done"
+        assert sim.port_status_description.startswith("Your number has been")
+        assert sim.port_date == "29-12-2025"
+        # Passed through raw: the page states no currency or unit.
+        assert sim.billing_amount == 999.0
+        assert sim.has_bill is False
+        assert sim.billing_days == ""
 
     def test_decoy_button_is_ignored(self) -> None:
         """`sim-option-check` is not a SIM selector."""
