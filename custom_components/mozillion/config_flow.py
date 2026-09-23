@@ -16,6 +16,7 @@ from homeassistant import config_entries
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigEntryState,
+    ConfigFlow,
     ConfigSubentryFlow,
     SubentryFlowResult,
 )
@@ -197,7 +198,7 @@ async def _async_validate(
     )
 
 
-class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
+class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle the account-level config flow."""
 
     VERSION = 3
@@ -211,9 +212,14 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ig
         self._xsrf_token: str | None = None
         self._reconfigure_entry: ConfigEntry | None = None
 
+    # Must be a classmethod: HA looks the handler up in HANDLERS and calls this
+    # on the class, so an instance method raised
+    #   TypeError: ... missing 1 required positional argument: 'config_entry'
+    # the moment HA enumerated the supported subentry types.
+    @classmethod
     @callback
     def async_get_supported_subentry_types(
-        self, config_entry: ConfigEntry
+        cls, config_entry: ConfigEntry
     ) -> dict[str, type[ConfigSubentryFlow]]:
         """Return the subentry types this integration supports."""
 
@@ -524,7 +530,10 @@ class MozillionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ig
         return await self.async_step_user(user_input)
 
     @staticmethod
-    def async_get_options_flow(config_entry: config_entries.ConfigEntry):
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> MozillionOptionsFlowHandler:
         return MozillionOptionsFlowHandler()
 
 

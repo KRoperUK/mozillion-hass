@@ -453,3 +453,32 @@ async def test_reconfigure_rejects_a_failed_login(hass: HomeAssistant) -> None:
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "reconfigure_confirm"
     assert result["errors"]["base"] == "cannot_connect"
+
+
+async def test_subentry_types_hook_is_callable_on_the_handler_class(
+    hass: HomeAssistant,
+) -> None:
+    """Home Assistant calls this hook on the class, not on an instance.
+
+    HA looks the handler up in ``HANDLERS`` and calls
+    ``handler.async_get_supported_subentry_types(entry)``. Declaring it as an
+    instance method bound the entry to ``self`` and raised::
+
+        TypeError: ... missing 1 required positional argument: 'config_entry'
+
+    so the supported subentry types could not be enumerated at all. This calls it
+    the way HA does -- on the class, not through a flow instance -- which is the
+    path the rest of the suite never exercised.
+    """
+
+    # Importing the module is what registers the domain, which happens at class
+    # definition time -- so the registry is empty until something imports it.
+    from custom_components.mozillion.config_flow import MozillionConfigFlow
+
+    handler = config_entries.HANDLERS.get(DOMAIN)
+    assert handler is MozillionConfigFlow, "HA resolves the handler through HANDLERS"
+
+    supported = handler.async_get_supported_subentry_types(_make_config_entry())
+
+    assert SUBENTRY_TYPE_SIM in supported
+    assert supported[SUBENTRY_TYPE_SIM] is not None

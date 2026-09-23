@@ -101,6 +101,20 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             config_entry=entry,
         )
 
+    @property
+    def entry(self) -> ConfigEntry:
+        """The config entry, narrowed from HA's optional attribute.
+
+        ``DataUpdateCoordinator.config_entry`` is typed ``ConfigEntry | None``
+        because a coordinator may be built without one. This one is always given
+        one by ``__init__``, so every use site can rely on it. Deliberately a
+        property rather than a second attribute: one source of truth means the
+        two can never disagree.
+        """
+
+        assert self.config_entry is not None
+        return self.config_entry
+
     def _reset_poll_state(self) -> None:
         """Initialise the per-session poll state.
 
@@ -126,7 +140,7 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
         work and the rest reuse the cookies; only that first one writes the entry.
         """
 
-        if await self.session.async_authenticate(self.client, self.config_entry):
+        if await self.session.async_authenticate(self.client, self.entry):
             await self._async_persist_auth()
 
     async def _async_persist_auth(self) -> None:
@@ -136,12 +150,10 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
         reload or restart does not immediately start with a stale token.
         """
 
-        if self.config_entry is None:
-            return
-        new_data = dict(self.config_entry.data)
+        new_data = dict(self.entry.data)
         new_data[CONF_SESSION_COOKIE] = self.session.cookie_header or ""
         new_data[CONF_XSRF_TOKEN] = self.session.xsrf_token or ""
-        self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
+        self.hass.config_entries.async_update_entry(self.entry, data=new_data)
 
     async def _async_fetch_usage(self) -> dict[str, Any]:
         """Call the usage endpoints for this SIM with the shared session."""
@@ -300,7 +312,7 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         _LOGGER.debug("Update cycle started")
         try:
-            if self.session.needs_authentication(self.config_entry):
+            if self.session.needs_authentication(self.entry):
                 await self._async_refresh_auth()
 
             if not self.session.cookie_header:
@@ -344,7 +356,7 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
         hand the problem to the user via a reauth flow.
         """
 
-        if not has_credentials(self.config_entry):
+        if not has_credentials(self.entry):
             raise ConfigEntryAuthFailed(
                 "Session expired and no credentials are configured to "
                 "re-authenticate. Please update the integration's credentials or "

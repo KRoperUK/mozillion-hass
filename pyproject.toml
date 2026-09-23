@@ -108,30 +108,7 @@ ignore = [
 "tests/*" = ["B", "SIM", "RUF003", "RUF059"]
 
 [tool.mypy]
+strict = true
 python_version = "3.14"
-ignore_missing_imports = true
-check_untyped_defs = true
 show_error_codes = true
 files = ["custom_components/mozillion"]
-
-[[tool.mypy.overrides]]
-module = "homeassistant.*"
-ignore_missing_imports = true
-follow_imports = "skip"
-
-[[tool.mypy.overrides]]
-module = "pyotp.*"
-ignore_missing_imports = true
-follow_imports = "skip"
-
-# HA types are unavailable at strict-mode check time (homeassistant is not
-# installed as a runtime dependency — it's only a test dependency). The
-# subclass, return-type, and override errors are all artefacts of HA types
-# being Any, so disable the checks that strict mode enables but can't satisfy.
-# The effective policy is: be strict about our own code, not about HA types.
-[[tool.mypy.overrides]]
-module = "custom_components.*"
-disallow_subclassing_any = false
-allow_untyped_defs = false
-warn_unused_ignores = true
-warn_return_any = true
