@@ -38,6 +38,12 @@ DEFAULT_ORIGIN = BASE_URL
 # poll with an already-expired cookie/token.
 AUTH_REFRESH_THRESHOLD = 43200  # 12 hours, in seconds
 
+# The dashboard markup is the integration's one genuinely fragile dependency;
+# raise a repair once reading it has failed this many polls in a row, so a
+# single blip does not nag the user.
+REPAIR_FAILURE_THRESHOLD = 3
+ISSUE_DASHBOARD_UNREADABLE = "dashboard_unreadable"
+
 ATTR_RAW = "raw"
 ATTR_USAGE = "usage"
 ATTR_TOTAL = "total"

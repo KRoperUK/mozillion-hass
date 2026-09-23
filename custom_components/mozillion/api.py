@@ -394,6 +394,7 @@ class MozillionClient:
 
         try:
             async with self._session.get(url, headers=headers) as resp:
+                _raise_for_rate_limit(resp)
                 resp.raise_for_status()
                 return await resp.text()
         except ClientError as err:
@@ -410,6 +411,7 @@ class MozillionClient:
         try:
             async with self._session.get(url, headers=headers, params=params) as resp:
                 await _require_authenticated(resp)
+                _raise_for_rate_limit(resp)
                 resp.raise_for_status()
                 try:
                     data = await resp.json(content_type=None)
@@ -603,6 +605,27 @@ def _raise_for_usage_error(payload: dict[str, Any]) -> None:
         raise RuntimeError(
             payload.get("message") or "Mozillion failed to refresh the usage data"
         )
+
+
+def _raise_for_rate_limit(resp: ClientResponse) -> None:
+    """Turn HTTP 429 into an error that says what to do about it.
+
+    Mozillion answers with a per-window request budget (``x-ratelimit-limit``), and
+    a bare "429, message='Too Many Requests'" gives the user nothing to act on.
+    The retry window is reported when the server sends one; we do not sleep here,
+    because the coordinator polls on its own schedule and blocking a poll for an
+    unknown period would be worse than trying again next cycle.
+    """
+
+    if resp.status != 429:
+        return
+
+    retry_after = str(resp.headers.get("Retry-After", "")).strip()
+    wait = f" Mozillion asked to wait {retry_after}s." if retry_after else ""
+    raise RuntimeError(
+        f"Mozillion rate-limited this request (HTTP 429).{wait} "
+        "Increase the scan interval in the integration options."
+    )
 
 
 async def _require_authenticated(resp: ClientResponse) -> None:

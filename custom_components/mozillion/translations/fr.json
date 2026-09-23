@@ -108,5 +108,11 @@
         "name": "Limite de dépassement atteinte"
       }
     }
+  },
+  "issues": {
+    "dashboard_unreadable": {
+      "title": "Impossible de lire le tableau de bord Mozillion",
+      "description": "Le tableau de bord de {entry} n'a pas pu être lu pendant {attempts} cycles consécutifs ; les données de forfait, d'état du service et de date de réinitialisation sont donc indisponibles.\n\nDernière erreur : {error}\n\nCela signifie généralement que Mozillion a modifié sa page, mais un problème de connexion ou de réseau produit le même effet. La consommation de données n'est pas affectée."
+    }
   }
 }

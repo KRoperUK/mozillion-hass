@@ -12,6 +12,7 @@ from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import MozillionAuthError, MozillionClient, MozillionSim, parse_reset_date
@@ -53,6 +54,9 @@ from .const import (
     CONF_TOTP_SECRET,
     CONF_XSRF_TOKEN,
     DEFAULT_ORIGIN,
+    DOMAIN,
+    ISSUE_DASHBOARD_UNREADABLE,
+    REPAIR_FAILURE_THRESHOLD,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -96,6 +100,11 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # when to proactively refresh an expiring session. Unknown (None) until
         # we authenticate, which forces a refresh when credentials are present.
         self._auth_time: float | None = None
+        # Consecutive failed reads of the dashboard, used to decide when the
+        # markup breakage is worth telling the user about, and whether we have
+        # an outstanding repair to withdraw.
+        self._dashboard_failures = 0
+        self._dashboard_repair_active = False
 
         super().__init__(
             hass,
@@ -208,13 +217,80 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Read usage, then the extras that are allowed to fail."""
 
         raw = await self._async_fetch_usage()
-        sim = await self._async_read_optional(
-            "the SIM details", self._async_fetch_sim()
-        )
+        sim = await self._async_read_dashboard()
         wallet = await self._async_read_optional(
             "the wallet balance", self._async_fetch_wallet()
         )
         return raw, sim, wallet
+
+    async def _async_read_dashboard(self) -> MozillionSim | None:
+        """Read the dashboard detail, tracking whether the page still parses.
+
+        The page markup is this integration's one genuinely fragile dependency,
+        and when it changes the only symptom used to be a log line: the plan,
+        status and reset entities quietly went unavailable and the user had no
+        idea why. Consecutive failures now raise a repair, because the fix is
+        outside Home Assistant.
+        """
+
+        try:
+            sim = await self._async_fetch_sim()
+        except MozillionAuthError:
+            raise
+        except (RuntimeError, ClientError) as err:
+            self._dashboard_failures += 1
+            _LOGGER.warning(
+                "Could not read the Mozillion dashboard (%d consecutive "
+                "failure(s)): %s",
+                self._dashboard_failures,
+                err,
+            )
+            if self._dashboard_failures >= REPAIR_FAILURE_THRESHOLD:
+                self._raise_dashboard_repair(str(err))
+            return None
+
+        if self._dashboard_failures:
+            _LOGGER.info(
+                "Mozillion dashboard read recovered after %d failure(s)",
+                self._dashboard_failures,
+            )
+            self._dashboard_failures = 0
+        self._clear_dashboard_repair()
+        return sim
+
+    def _raise_dashboard_repair(self, error: str) -> None:
+        """Tell the user the dashboard cannot be read."""
+
+        # Re-created on each failing poll so the reported attempt count and last
+        # error stay current; the registry keys on the issue id, so this updates
+        # the existing issue rather than stacking new ones.
+        self._dashboard_repair_active = True
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            ISSUE_DASHBOARD_UNREADABLE,
+            is_fixable=False,
+            is_persistent=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_DASHBOARD_UNREADABLE,
+            translation_placeholders={
+                "attempts": str(self._dashboard_failures),
+                "error": error[:200],
+                "entry": self.config_entry.title,
+            },
+        )
+
+    def _clear_dashboard_repair(self) -> None:
+        """Withdraw the repair, but only if one was raised.
+
+        Guarded so an ordinary healthy poll never touches the issue registry --
+        only a recovery transition does.
+        """
+
+        if not self._dashboard_repair_active:
+            return
+        self._dashboard_repair_active = False
+        ir.async_delete_issue(self.hass, DOMAIN, ISSUE_DASHBOARD_UNREADABLE)
 
     async def _async_update_data(self) -> CoordinatorData:
         """Fetch data from API, transparently re-authenticating on expiry."""

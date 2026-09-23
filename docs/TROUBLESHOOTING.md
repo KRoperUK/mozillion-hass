@@ -38,7 +38,8 @@ The last poll failed, so Home Assistant marks the entities unavailable while
 keeping the last known values in the recorder.
 
 - Check the logs for `Update failed:` or `Error communicating with Mozillion`.
-- A `429` means Mozillion rate-limited the request; increase the scan interval.
+- **Rate limited.** Mozillion answers `429` when you exceed its request budget, and
+  the error says how long to wait. Raise the scan interval under *Configure*.
 - Transient outages clear themselves on the next poll cycle.
 
 ### Sensors show "unknown"
@@ -54,6 +55,24 @@ Mozillion regenerates usage server-side and answers `pending` until it is ready;
 the integration polls for up to about 15 seconds per cycle. If it never becomes
 ready, the cycle fails and retries at the next scan interval. Mozillion's own
 dashboard shows the same delay on its refresh button.
+
+### A repair says the dashboard cannot be read
+
+If the plan, service status and reset date go unavailable while the data usage
+sensors keep working, look for a repair on the integration page:
+
+> **Mozillion dashboard cannot be read** — the dashboard has not been read
+> successfully for several consecutive polls.
+
+Those values are scraped from Mozillion's dashboard page, and this appears when
+that page stops parsing — usually because Mozillion changed it. A login or network
+problem can look identical, so the repair quotes the last error: if it mentions
+the login page, re-authenticate instead.
+
+Data usage is unaffected, because it comes from a JSON endpoint rather than the
+page. The repair clears itself as soon as a poll reads the page successfully.
+Please [open an issue](https://github.com/KRoperUK/mozillion-hass/issues) with a
+diagnostics download if it persists.
 
 ### "Authentication failed" / re-authentication requested
 
