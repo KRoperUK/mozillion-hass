@@ -760,8 +760,22 @@ class TestParseResetDate:
     def test_label_later_this_year(self) -> None:
         assert parse_reset_date("19 Oct", today=date(2026, 9, 21)) == date(2026, 10, 19)
 
-    def test_label_already_passed_rolls_to_next_year(self) -> None:
-        assert parse_reset_date("19 Aug", today=date(2026, 9, 21)) == date(2027, 8, 19)
+    def test_stale_label_rolls_to_the_next_month(self) -> None:
+        """The reset is monthly, so a passed label means the next month's.
+
+        Rolling to next year instead — which is what this used to do — put the
+        sensor about eleven months out, exactly what a stale cached label looks
+        like.
+        """
+        assert parse_reset_date("19 Aug", today=date(2026, 9, 1)) == date(2026, 9, 19)
+
+    def test_stale_label_within_the_same_month(self) -> None:
+        assert parse_reset_date("19 Oct", today=date(2026, 10, 20)) == date(
+            2026, 11, 19
+        )
+
+    def test_year_boundary_still_lands_in_the_new_year(self) -> None:
+        assert parse_reset_date("19 Dec", today=date(2026, 12, 20)) == date(2027, 1, 19)
 
     def test_label_on_today_is_kept(self) -> None:
         assert parse_reset_date("21 Sep", today=date(2026, 9, 21)) == date(2026, 9, 21)
@@ -804,9 +818,14 @@ class TestParseResetDate:
     def test_unknown_month(self) -> None:
         assert parse_reset_date("19 Foo", today=date(2026, 9, 21)) is None
 
-    def test_impossible_day(self) -> None:
+    def test_day_the_labelled_month_never_holds_is_refused(self) -> None:
+        """February never has 31 days, so '31 Feb' is a nonsense label."""
         assert parse_reset_date("31 Feb", today=date(2026, 9, 21)) is None
 
-    def test_leap_day_without_a_next_leap_year(self) -> None:
-        """29 February exists in 2024 but not 2025, so give up rather than guess."""
-        assert parse_reset_date("29 Feb", today=date(2024, 3, 1)) is None
+    def test_thirty_first_skips_months_without_it(self) -> None:
+        """Day 31 is taken at its word, so it lands in the next month that has one."""
+        assert parse_reset_date("31 Oct", today=date(2026, 11, 1)) == date(2026, 12, 31)
+
+    def test_leap_day_rolls_forward_like_any_other_day(self) -> None:
+        """No year rollover any more, so 29 February is not a special case."""
+        assert parse_reset_date("29 Feb", today=date(2024, 3, 1)) == date(2024, 3, 29)

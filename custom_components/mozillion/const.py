@@ -1,7 +1,6 @@
 """Constants for the Mozillion integration."""
 
 DOMAIN = "mozillion"
-PLATFORMS = ["sensor", "binary_sensor"]
 
 BASE_URL = "https://www.mozillion.com"
 LOGIN_PATH = "/login"

@@ -542,28 +542,49 @@ def parse_reset_date(
         return None
 
     day_text, month_text, year_text = match.groups()
+    day = int(day_text)
     month = _MONTHS.get(month_text[:3].lower())
     if month is None:
         _LOGGER.debug("Unknown month %r in the reset label", month_text)
         return None
 
-    year = int(year_text) if year_text else today.year
+    # A day the labelled month can never hold means the label is nonsense, so do
+    # not stand a date up on it. 2024 is a leap year, so 29 February passes.
     try:
-        candidate = date(year, month, int(day_text))
+        date(2024, month, day)
     except ValueError:
         _LOGGER.debug("Invalid day in the reset label %r", label)
         return None
 
-    if year_text or candidate >= today:
-        return candidate
+    if year_text:
+        try:
+            return date(int(year_text), month, day)
+        except ValueError:
+            _LOGGER.debug("Invalid date in the reset label %r", label)
+            return None
 
-    # The reset for this year has been and gone, so it must be the next one.
-    try:
-        return candidate.replace(year=candidate.year + 1)
-    except ValueError:
-        # 29 February: the following year has no such day.
-        _LOGGER.debug("Cannot move %s into the next year", candidate)
-        return None
+    # No year: Mozillion's resets recur monthly and the label moves on to the next
+    # month after each one, so the answer is the next occurrence of this day of the
+    # month -- starting from the month Mozillion named. Rolling to the *next year*
+    # instead put the sensor around eleven months out whenever a cached label went
+    # stale, which is exactly when the dashboard cannot be read and the cache is
+    # all we have.
+    year = today.year
+    for _ in range(13):
+        try:
+            candidate = date(year, month, day)
+        except ValueError:
+            # This month has no such day (e.g. the 31st); try the next one.
+            candidate = None
+        if candidate is not None and candidate >= today:
+            return candidate
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+
+    _LOGGER.debug("Could not find a future reset date for %r", label)
+    return None
 
 
 def _to_float(value: str | None) -> float | None:

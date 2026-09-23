@@ -136,6 +136,11 @@ blueprint covers every SIM you add.
   order detail id and SIM meta id.
 - **A cookie-only entry cannot renew itself.** When the session expires you are
   asked to re-authenticate; supply email/password to get transparent renewal.
+- **The reset date is inferred.** The dashboard gives a day and month with no year
+  (`19 Oct`). Because Mozillion's resets recur monthly — the label moves on to the
+  next month once a reset passes — the date shown is the next occurrence of that day.
+  The raw label and the day count are exposed as attributes on the sensor, so
+  Mozillion's own wording is never hidden.
 - **Your plan's allowance is not the allowance you can use abroad.** Mozillion caps
   how much of a plan's data can be used in the EU, and that cap varies by plan and is
   not exposed by the dashboard page or the usage endpoints. `Remaining` therefore
