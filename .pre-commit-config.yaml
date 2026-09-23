@@ -23,6 +23,14 @@ repos:
         args: [--fix]
       - id: ruff-format
 
+  # Lint the workflow files themselves. CI runs ruff directly rather than
+  # pre-commit, so ci.yml carries a matching actionlint step -- the two must stay
+  # in step, or a workflow defect blocks locally while passing in CI.
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+
   # Keep manifest.json keys in the order hassfest expects (domain/name first,
   # then alphabetical) so CI's hassfest validation never trips on ordering.
   - repo: local

@@ -81,6 +81,12 @@ jobs:
       - name: Check formatting
         run: source .venv/bin/activate && ruff format --check custom_components/ scripts/ tests/
 
+      - name: Lint the workflows with actionlint
+        # Official image pinned by digest: the tag could be re-pointed, a digest
+        # cannot. Matches the actionlint pre-commit hook so a workflow defect is
+        # caught by whichever runs first.
+        uses: docker://rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+
   test:
     needs: changes
     if: needs.changes.outputs.component == 'true'
@@ -298,9 +304,11 @@ jobs:
           WORKFLOW_EVENT=push
           export VERSION RC_NUMBER HEAD_BRANCH WORKFLOW_EVENT
           TAG=$(bash scripts/compute-dev-tag.sh)
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "skip=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "tag=${TAG}"
+            echo "version=${VERSION}"
+            echo "skip=false"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Prune superseded main RC pre-releases
         if: ${{ steps.tag.outputs.skip != 'true' }}
