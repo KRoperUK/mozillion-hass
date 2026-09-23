@@ -6,7 +6,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from custom_components.mozillion.api import MozillionAuthError
-from custom_components.mozillion.const import ATTR_USAGE, DOMAIN
+from custom_components.mozillion.const import (
+    ATTR_BILLING_AMOUNT,
+    ATTR_HAS_BILL,
+    ATTR_PLAN_PARENTAL_CONTROL,
+    ATTR_PLAN_VOICEMAIL,
+    ATTR_PORT_DATE,
+    ATTR_PORT_STATUS,
+    ATTR_USAGE,
+    DOMAIN,
+)
 from custom_components.mozillion.coordinator import MozillionCoordinator
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, State
@@ -234,3 +243,31 @@ async def test_an_account_with_no_sims_is_a_setup_error(
         await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.SETUP_ERROR
+
+
+async def test_the_port_status_and_plan_details_are_exposed(
+    hass: HomeAssistant,
+) -> None:
+    """The dashboard's porting and plan detail reach Home Assistant.
+
+    The port label is the sensor's state and the machine value stays in the
+    attributes, because Mozillion uses status values this integration has not
+    seen and inventing an enum would be guesswork.
+    """
+
+    entry = _entry(hass)
+
+    with patch(CLIENT, return_value=_client()):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    port = _sensor_ending(hass, "_number_port_status")
+    assert port.state == "Done"
+
+    status = _sensor_ending(hass, "_sim_status")
+    assert status.attributes[ATTR_PORT_STATUS] == "DONE"
+    assert status.attributes[ATTR_PORT_DATE] == "29-12-2025"
+    assert status.attributes[ATTR_PLAN_VOICEMAIL] is True
+    assert status.attributes[ATTR_PLAN_PARENTAL_CONTROL] is False
+    assert status.attributes[ATTR_BILLING_AMOUNT] == 999.0
+    assert status.attributes[ATTR_HAS_BILL] is False

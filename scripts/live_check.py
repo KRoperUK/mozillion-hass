@@ -131,7 +131,27 @@ async def _run() -> int:
         )
         print(
             f"  plan={detail.plan_data_tariff!r} duration={detail.plan_duration!r} "
-            f"roaming={detail.plan_roaming!r}"
+            f"roaming={detail.plan_roaming!r} texts={detail.plan_texts_minutes!r}"
+        )
+        print(
+            f"  voicemail={detail.plan_voicemail} "
+            f"parental_control={detail.plan_parental_control}"
+        )
+        print(
+            f"  port_status={detail.port_status!r} "
+            f"label={detail.port_status_label!r} date={detail.port_date!r}"
+        )
+        if detail.port_status_description:
+            print(f"    {detail.port_status_description}")
+        # Checked, not printed: the billing fields are financial data, so the
+        # figures stay out of the log. What matters here is that they parse.
+        _check(
+            detail.billing_amount is None or isinstance(detail.billing_amount, float),
+            "billing_amount parsed as a number (not printed)",
+        )
+        _check(
+            isinstance(detail.has_bill, bool),
+            "has_bill parsed as a boolean (not printed)",
         )
 
         print("5. out-of-bundle wallet balance")

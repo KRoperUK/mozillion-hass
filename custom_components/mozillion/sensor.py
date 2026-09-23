@@ -19,13 +19,22 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import MozillionConfigEntry
 from .const import (
+    ATTR_BILLING_AMOUNT,
+    ATTR_BILLING_DAYS,
     ATTR_DAYS_LEFT,
+    ATTR_HAS_BILL,
     ATTR_ICCID,
     ATTR_PLAN_DURATION,
     ATTR_PLAN_IS_DATA_ONLY,
+    ATTR_PLAN_PARENTAL_CONTROL,
     ATTR_PLAN_ROAMING,
     ATTR_PLAN_TARIFF,
     ATTR_PLAN_TEXTS,
+    ATTR_PLAN_VOICEMAIL,
+    ATTR_PORT_DATE,
+    ATTR_PORT_STATUS,
+    ATTR_PORT_STATUS_DESCRIPTION,
+    ATTR_PORT_STATUS_LABEL,
     ATTR_RAW,
     ATTR_REMAINING,
     ATTR_RESET_DATE,
@@ -55,6 +64,12 @@ from .entity import MozillionEntity
 # The wallet figures come from the dashboard's overspend endpoint. A SIM with no
 # wallet answers all zeros, so those entities report unavailable unless the
 # wallet is actually in use (see `wallet_is_active`).
+#
+# GBP is an assumption, not something the endpoint states: Mozillion is a UK
+# service and the site's own monetary attributes are in pounds, but the endpoint
+# gives no currency and no scale, and a never-topped-up wallet reads zero, so the
+# scale has never been checked against a real figure. Noted under known
+# limitations in docs/index.md.
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -127,6 +142,21 @@ DATA_SENSORS: tuple[MozillionSensorEntityDescription, ...] = (
         state_class=SensorStateClass.TOTAL,
         value_fn=lambda data: data.get(ATTR_WALLET_SPEND),
         available_fn=wallet_is_active,
+    ),
+    MozillionSensorEntityDescription(
+        key=ATTR_PORT_STATUS,
+        translation_key="port_status",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        # The page's own wording rather than a status the integration would have
+        # to invent: Mozillion uses values this integration has not seen, so the
+        # label is shown and the raw value stays in the attributes.
+        value_fn=lambda data: (
+            data.get(ATTR_PORT_STATUS_LABEL) or data.get(ATTR_PORT_STATUS) or None
+        ),
+        # A SIM whose number was never ported reports nothing, and an entity
+        # stuck on unknown would be noise -- the same treatment the wallet
+        # figures get.
+        available_fn=lambda data: bool(data.get(ATTR_PORT_STATUS)),
     ),
     MozillionSensorEntityDescription(
         key=ATTR_SIM_STATUS,
@@ -209,5 +239,16 @@ class MozillionSensor(MozillionEntity, SensorEntity):
             ATTR_PLAN_ROAMING: data.get(ATTR_PLAN_ROAMING),
             ATTR_PLAN_TEXTS: data.get(ATTR_PLAN_TEXTS),
             ATTR_PLAN_IS_DATA_ONLY: data.get(ATTR_PLAN_IS_DATA_ONLY),
+            ATTR_PLAN_VOICEMAIL: data.get(ATTR_PLAN_VOICEMAIL),
+            ATTR_PLAN_PARENTAL_CONTROL: data.get(ATTR_PLAN_PARENTAL_CONTROL),
+            ATTR_PORT_STATUS: data.get(ATTR_PORT_STATUS),
+            ATTR_PORT_STATUS_DESCRIPTION: data.get(ATTR_PORT_STATUS_DESCRIPTION),
+            ATTR_PORT_DATE: data.get(ATTR_PORT_DATE),
+            # Raw, with no unit claimed: the page states neither a currency nor
+            # whether this is pence, and only says "Paid in full / No upcoming
+            # bill" beside it.
+            ATTR_BILLING_AMOUNT: data.get(ATTR_BILLING_AMOUNT),
+            ATTR_HAS_BILL: data.get(ATTR_HAS_BILL),
+            ATTR_BILLING_DAYS: data.get(ATTR_BILLING_DAYS),
             ATTR_WALLET: data.get(ATTR_WALLET),
         }

@@ -138,6 +138,9 @@
       "wallet_spend": {
         "name": "Gwariant y tu allan i'r pecyn"
       },
+      "port_status": {
+        "name": "Statws cludo rhif"
+      },
       "sim_status": {
         "name": "Statws SIM"
       }

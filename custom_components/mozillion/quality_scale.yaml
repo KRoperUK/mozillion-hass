@@ -143,8 +143,12 @@ rules:
       ``test_adding_a_sim_produces_its_entities`` and
       ``test_removing_a_sim_removes_its_entities``.
   entity-category:
-    status: exempt
-    comment: Every entity is primary data; none are diagnostic or configuration settings.
+    status: done
+    comment: >-
+      The usage, allowance, wallet and reset entities are primary data. The SIM
+      service status and the number port status are marked diagnostic: they are
+      line metadata about the SIM rather than readings, and grouping them under
+      Diagnostic keeps them out of the way of the usage figures.
   entity-device-class:
     status: done
     comment: Data sensors use DATA_SIZE and the percentage sensor uses MEASUREMENT.

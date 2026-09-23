@@ -30,6 +30,9 @@
       "wallet_spend": {
         "default": "mdi:cash-minus"
       },
+      "port_status": {
+        "default": "mdi:phone-forward"
+      },
       "sim_status": {
         "default": "mdi:sim-alert"
       }

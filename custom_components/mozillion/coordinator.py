@@ -17,14 +17,23 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import MozillionAuthError, MozillionClient, MozillionSim, parse_reset_date
 from .const import (
+    ATTR_BILLING_AMOUNT,
+    ATTR_BILLING_DAYS,
     ATTR_DAYS_LEFT,
+    ATTR_HAS_BILL,
     ATTR_ICCID,
     ATTR_OVERSPEND_LIMIT_REACHED,
     ATTR_PLAN_DURATION,
     ATTR_PLAN_IS_DATA_ONLY,
+    ATTR_PLAN_PARENTAL_CONTROL,
     ATTR_PLAN_ROAMING,
     ATTR_PLAN_TARIFF,
     ATTR_PLAN_TEXTS,
+    ATTR_PLAN_VOICEMAIL,
+    ATTR_PORT_DATE,
+    ATTR_PORT_STATUS,
+    ATTR_PORT_STATUS_DESCRIPTION,
+    ATTR_PORT_STATUS_LABEL,
     ATTR_RAW,
     ATTR_REMAINING,
     ATTR_RESET_DATE,
@@ -433,6 +442,13 @@ def _build_coordinator_data(
         ATTR_WALLET_BALANCE: None,
         ATTR_WALLET_SPEND: None,
         ATTR_OVERSPEND_LIMIT_REACHED: None,
+        ATTR_PORT_STATUS: "",
+        ATTR_PORT_STATUS_LABEL: "",
+        ATTR_PORT_STATUS_DESCRIPTION: "",
+        ATTR_PORT_DATE: "",
+        ATTR_BILLING_AMOUNT: None,
+        ATTR_HAS_BILL: False,
+        ATTR_BILLING_DAYS: "",
     }
 
     if sim is not None:
@@ -445,6 +461,15 @@ def _build_coordinator_data(
         data[ATTR_PLAN_ROAMING] = sim.plan_roaming
         data[ATTR_PLAN_TEXTS] = sim.plan_texts_minutes
         data[ATTR_PLAN_IS_DATA_ONLY] = sim.plan_is_data_only
+        data[ATTR_PLAN_VOICEMAIL] = sim.plan_voicemail
+        data[ATTR_PLAN_PARENTAL_CONTROL] = sim.plan_parental_control
+        data[ATTR_PORT_STATUS] = sim.port_status
+        data[ATTR_PORT_STATUS_LABEL] = sim.port_status_label
+        data[ATTR_PORT_STATUS_DESCRIPTION] = sim.port_status_description
+        data[ATTR_PORT_DATE] = sim.port_date
+        data[ATTR_BILLING_AMOUNT] = sim.billing_amount
+        data[ATTR_HAS_BILL] = sim.has_bill
+        data[ATTR_BILLING_DAYS] = sim.billing_days
 
     if wallet is not None:
         data[ATTR_WALLET] = wallet

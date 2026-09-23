@@ -138,6 +138,9 @@
       "wallet_spend": {
         "name": "Caiteachas lasmuigh den phlean"
       },
+      "port_status": {
+        "name": "Stádas aistrithe uimhreach"
+      },
       "sim_status": {
         "name": "Stádas SIM"
       }
