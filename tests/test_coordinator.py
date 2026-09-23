@@ -95,6 +95,8 @@ def _make_coordinator_for_entry(
     hass = MagicMock()
     hass.config_entries = MagicMock()
     hass.config_entries.async_update_entry = AsyncMock()
+    # A real dict, because the repair path reaches the issue registry via hass.data.
+    hass.data = {}
 
     coordinator = MozillionCoordinator.__new__(MozillionCoordinator)
     coordinator.client = client
@@ -106,6 +108,8 @@ def _make_coordinator_for_entry(
     coordinator.totp_secret = entry.data.get(CONF_TOTP_SECRET) or None
     coordinator.origin = entry.data.get(CONF_ORIGIN, DEFAULT_ORIGIN)
     coordinator._auth_time = None
+    coordinator._dashboard_failures = 0
+    coordinator._dashboard_repair_active = False
     coordinator.hass = hass
     return coordinator
 

@@ -108,5 +108,11 @@
         "name": "Teorainn róchaiteachais sroichte"
       }
     }
+  },
+  "issues": {
+    "dashboard_unreadable": {
+      "title": "Ní féidir deais Mozillion a léamh",
+      "description": "Níorbh fhéidir deais {entry} a léamh ar feadh {attempts} timthriall as a chéile, mar sin níl an plean, stádas an tseirbhís ná an dáta athshocraithe ar fáil.\n\nAn earráid dheireanach: {error}\n\nDe ghnáth ciallaíonn sé seo gur athraigh Mozillion a leathanach, cé go bhfuil cuma chomhionann ar fhadhb logála isteach nó líonra. Níl tionchar ar an úsáid sonraí féin."
+    }
   }
 }

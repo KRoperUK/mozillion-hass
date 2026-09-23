@@ -108,5 +108,11 @@
         "name": "Overspend limit reached"
       }
     }
+  },
+  "issues": {
+    "dashboard_unreadable": {
+      "title": "Mozillion dashboard cannot be read",
+      "description": "The dashboard for {entry} could not be read for {attempts} consecutive polls, so the plan, service status and reset date are unavailable.\n\nLast error: {error}\n\nThis usually means Mozillion has changed their page markup, though a login or network problem looks the same. Data usage itself is unaffected."
+    }
   }
 }

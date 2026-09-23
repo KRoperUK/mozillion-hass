@@ -160,10 +160,11 @@ rules:
     status: done
     comment: Reconfigure keeps the entry and its history while switching SIM or refreshing credentials.
   repair-issues:
-    status: exempt
+    status: done
     comment: >-
-      The one actionable failure (rejected credentials) is already handled by
-      the reauth flow, which the UI links to directly.
+      A dashboard read that keeps failing raises a repair, because the fix is
+      outside Home Assistant (Mozillion changing their page markup). Rejected
+      credentials are handled by the reauth flow instead.
   stale-devices:
     status: exempt
     comment: Devices are removed with their config entry.

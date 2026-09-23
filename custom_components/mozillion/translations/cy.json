@@ -108,5 +108,11 @@
         "name": "Wedi cyrraedd y terfyn gorwario"
       }
     }
+  },
+  "issues": {
+    "dashboard_unreadable": {
+      "title": "Methu darllen bwrdd dangos Mozillion",
+      "description": "Ni lwyddwyd i ddarllen bwrdd dangos {entry} am {attempts} cylch yn olynol, felly nid yw'r pecyn, statws y gwasanaeth na'r dyddiad ailosod ar gael.\n\nGwall diwethaf: {error}\n\nFel arfer mae hyn yn golygu bod Mozillion wedi newid ei dudalen, er bod problem mewngofnodi neu rwydwaith yn edrych yr un fath. Nid yw'r defnydd data ei hun yn cael ei effeithio."
+    }
   }
 }
