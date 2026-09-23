@@ -1,7 +1,12 @@
-"""Tests for the Mozillion diagnostics download."""
+"""Tests for the Mozillion diagnostics download.
+
+The entry is the account and each SIM is a subentry, so the redaction has to cover
+both -- plus the coordinator payload, which repeats the SIM's identifiers.
+"""
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -14,7 +19,6 @@ from custom_components.mozillion.const import (
     CONF_SIM_NUMBER,
     CONF_TOTP_SECRET,
     CONF_XSRF_TOKEN,
-    DOMAIN,
 )
 from custom_components.mozillion.diagnostics import (
     async_get_config_entry_diagnostics,
@@ -25,6 +29,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from tests.conftest import (
     MOCK_API_RESPONSE,
     MOCK_ENTRY_DATA_LOGIN,
+    _make_config_entry,
+    sim_subentry,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -38,8 +44,7 @@ SECRETS = {
     CONF_XSRF_TOKEN: "xsrf-secret",
 }
 
-# Identifiers are redacted in the payloads but still name the device, so they
-# appear in the entry title that the UI already shows.
+# The SIM's identifiers sit on the subentry now, and are redacted too.
 IDENTIFIERS = {
     CONF_SIM_NUMBER: "07700900000",
     CONF_ICCID: "89440000000000000000",
@@ -51,16 +56,12 @@ def _enable_custom_integrations(enable_custom_integrations):
     yield
 
 
-def _entry_with_coordinator(hass: HomeAssistant) -> MockConfigEntry:
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="Mozillion 07700900000",
-        data={**MOCK_ENTRY_DATA_LOGIN, **SECRETS, **IDENTIFIERS},
-        options={},
-        unique_id="7654321",
-        version=2,
-    )
+def _entry_with_coordinator(hass: HomeAssistant) -> tuple[MockConfigEntry, str]:
+    """Return an account entry with one SIM coordinator attached."""
+
+    entry = _make_config_entry(data={**MOCK_ENTRY_DATA_LOGIN, **SECRETS})
     entry.add_to_hass(hass)
+    subentry_id = sim_subentry(entry).subentry_id
 
     coordinator = MagicMock()
     coordinator.last_update_success = True
@@ -74,55 +75,62 @@ def _entry_with_coordinator(hass: HomeAssistant) -> MockConfigEntry:
         "iccid": IDENTIFIERS[CONF_ICCID],
     }
     entry.runtime_data = MozillionRuntimeData(
-        client=MagicMock(), coordinator=coordinator
+        client=MagicMock(),
+        session=MagicMock(),
+        coordinators={subentry_id: coordinator},
     )
-    return entry
+    return entry, subentry_id
 
 
 async def test_secrets_are_redacted(hass: HomeAssistant) -> None:
     """Nothing that grants access may survive into a diagnostics download."""
-    diagnostics = await async_get_config_entry_diagnostics(
-        hass, _entry_with_coordinator(hass)
-    )
+    entry, subentry_id = _entry_with_coordinator(hass)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
 
     dumped = str(diagnostics)
     for key, value in SECRETS.items():
         assert value not in dumped, f"{key} leaked into diagnostics"
 
-    # Redaction must reach the nested coordinator payload too, not just entry.data.
-    assert diagnostics["entry"]["data"][CONF_SIM_NUMBER] == "**REDACTED**"
-    assert diagnostics["entry"]["data"][CONF_ICCID] == "**REDACTED**"
-    assert diagnostics["coordinator"]["data"]["sim_number"] == "**REDACTED**"
-    assert diagnostics["coordinator"]["data"]["iccid"] == "**REDACTED**"
+    # Redaction reaches the subentry and the coordinator payload, not just entry.data.
+    subentry_data = diagnostics["subentries"][subentry_id]["data"]
+    assert subentry_data[CONF_SIM_NUMBER] == "**REDACTED**"
+    assert subentry_data[CONF_ICCID] == "**REDACTED**"
+    assert diagnostics["coordinators"][subentry_id]["data"]["sim_number"] == (
+        "**REDACTED**"
+    )
+    assert diagnostics["coordinators"][subentry_id]["data"]["iccid"] == "**REDACTED**"
 
 
 async def test_usage_figures_survive(hass: HomeAssistant) -> None:
     """The values diagnostics exist to explain must still be present."""
-    diagnostics = await async_get_config_entry_diagnostics(
-        hass, _entry_with_coordinator(hass)
-    )
-
-    assert diagnostics["coordinator"]["data"]["usage"] == 3.5
-    assert diagnostics["coordinator"]["data"]["total"] == 10.0
-    assert diagnostics["coordinator"]["data"]["raw"] == MOCK_API_RESPONSE
-
-
-async def test_coordinator_health_is_reported(hass: HomeAssistant) -> None:
-    entry = _entry_with_coordinator(hass)
+    entry, subentry_id = _entry_with_coordinator(hass)
 
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
 
-    assert diagnostics["coordinator"]["last_update_success"] is True
-    assert diagnostics["coordinator"]["last_exception"] is None
-    assert diagnostics["entry"]["title"] == "Mozillion 07700900000"
-    assert diagnostics["entry"]["version"] == 2
+    payload: dict[str, Any] = diagnostics["coordinators"][subentry_id]["data"]
+    assert payload["usage"] == 3.5
+    assert payload["total"] == 10.0
+    assert payload["raw"] == MOCK_API_RESPONSE
+
+
+async def test_coordinator_health_is_reported(hass: HomeAssistant) -> None:
+    entry, subentry_id = _entry_with_coordinator(hass)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    health = diagnostics["coordinators"][subentry_id]
+    assert health["last_update_success"] is True
+    assert health["last_exception"] is None
+    assert diagnostics["entry"]["version"] == 3
+    assert diagnostics["subentries"][subentry_id]["type"] == "sim"
 
 
 async def test_exception_is_reported_as_a_string(hass: HomeAssistant) -> None:
     """A raw exception object is not serialisable."""
-    entry = _entry_with_coordinator(hass)
-    entry.runtime_data.coordinator.last_exception = RuntimeError("boom")
+    entry, subentry_id = _entry_with_coordinator(hass)
+    entry.runtime_data.coordinators[subentry_id].last_exception = RuntimeError("boom")
 
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
 
-    assert diagnostics["coordinator"]["last_exception"] == "boom"
+    assert diagnostics["coordinators"][subentry_id]["last_exception"] == "boom"

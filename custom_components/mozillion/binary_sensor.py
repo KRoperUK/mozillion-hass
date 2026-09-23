@@ -5,16 +5,18 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
+from . import MozillionConfigEntry
 from .const import (
     ATTR_OVERSPEND_LIMIT_REACHED,
     ATTR_UNLIMITED,
     ATTR_USAGE,
     ATTR_USAGE_PERCENTAGE,
     ATTR_WALLET,
+    SUBENTRY_TYPE_SIM,
 )
 from .coordinator import MozillionCoordinator, wallet_is_active
 from .entity import MozillionEntity
@@ -22,19 +24,23 @@ from .entity import MozillionEntity
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    entry: MozillionConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up Mozillion binary sensors from config entry."""
+    """Set up a binary sensor set for every SIM on the account."""
 
-    coordinator = entry.runtime_data.coordinator
+    for subentry in entry.subentries.values():
+        if subentry.subentry_type != SUBENTRY_TYPE_SIM:
+            continue
 
-    async_add_entities(
-        [
-            MozillionUnlimitedSensor(coordinator, entry),
-            MozillionOverspendSensor(coordinator, entry),
-        ]
-    )
+        coordinator = entry.runtime_data.coordinators[subentry.subentry_id]
+        async_add_entities(
+            [
+                MozillionUnlimitedSensor(coordinator, entry, subentry),
+                MozillionOverspendSensor(coordinator, entry, subentry),
+            ],
+            config_subentry_id=subentry.subentry_id,
+        )
 
 
 class MozillionUnlimitedSensor(MozillionEntity, BinarySensorEntity):
@@ -46,9 +52,10 @@ class MozillionUnlimitedSensor(MozillionEntity, BinarySensorEntity):
         self,
         coordinator: MozillionCoordinator,
         entry: ConfigEntry,
+        subentry: ConfigSubentry,
     ) -> None:
         """Initialize the unlimited sensor."""
-        super().__init__(coordinator, entry, ATTR_UNLIMITED)
+        super().__init__(coordinator, entry, subentry, ATTR_UNLIMITED)
 
     @property
     def is_on(self) -> bool:
@@ -75,9 +82,10 @@ class MozillionOverspendSensor(MozillionEntity, BinarySensorEntity):
         self,
         coordinator: MozillionCoordinator,
         entry: ConfigEntry,
+        subentry: ConfigSubentry,
     ) -> None:
         """Initialize the overspend sensor."""
-        super().__init__(coordinator, entry, ATTR_OVERSPEND_LIMIT_REACHED)
+        super().__init__(coordinator, entry, subentry, ATTR_OVERSPEND_LIMIT_REACHED)
 
     @property
     def available(self) -> bool:

@@ -72,6 +72,16 @@ If the SIM list cannot be read, you are asked for the ids manually:
 | SIM meta ID | Yes | `data-sim-id` on the same element |
 | SIM number | No | Used only for naming the device |
 
+### Adding another SIM
+
+The entry represents your Mozillion **account**, not one SIM. To track a second SIM,
+open *Settings → Devices & Services → Mozillion* and choose **Add SIM** on the entry —
+there is no need to enter your credentials again. Each SIM gets its own device and set
+of entities, and the scan interval applies to all of them.
+
+To point an existing SIM at a different one, use **Reconfigure** on that SIM's subentry
+rather than on the account.
+
 ## Configuration parameters
 
 Options are reached through *Settings → Devices & Services → Mozillion →
@@ -81,9 +91,9 @@ Configure*.
 | --- | --- | --- |
 | Scan interval | 3600 seconds | How often Home Assistant polls. Each poll also asks Mozillion to regenerate the figures, so there is no benefit in polling faster than the provider updates |
 
-Changing credentials or moving an entry to a different SIM is done with the
-**Reconfigure** action on the integration page, which keeps the entry, its
-entities and their history.
+Changing credentials is done with **Reconfigure** on the account entry; changing
+which SIM a subentry tracks is done with **Reconfigure** on that SIM. Both keep the
+entry, its entities and their history.
 
 ## Removal
 

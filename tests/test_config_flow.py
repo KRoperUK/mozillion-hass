@@ -6,7 +6,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from custom_components.mozillion.api import MozillionAuthError, MozillionSim
+from custom_components.mozillion.api import MozillionAuthError
 from custom_components.mozillion.const import (
     CONF_EMAIL,
     CONF_ICCID,
@@ -20,12 +20,13 @@ from custom_components.mozillion.const import (
     CONF_XSRF_TOKEN,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    SUBENTRY_TYPE_SIM,
 )
 from homeassistant import config_entries, data_entry_flow
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from tests.conftest import MOCK_ENTRY_DATA_COOKIE, MOCK_SIM
+from tests.conftest import MOCK_ENTRY_DATA_COOKIE, MOCK_SIM, _make_config_entry
 
 pytestmark = pytest.mark.asyncio
 
@@ -147,19 +148,29 @@ async def test_selecting_a_sim_creates_the_entry(hass: HomeAssistant) -> None:
         )
 
     assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
-    assert result["title"] == MOCK_SIM.display_name
+    # The entry is the account and the SIM is a subentry of it, so the credentials
+    # live once however many SIMs the account ends up tracking.
+    assert result["title"] == "user@example.com"
     data = result["data"]
-    assert data[CONF_SIM_META_ID] == "7654321"
-    assert data[CONF_ORDER_DETAIL_ID] == "1234567"
-    assert data[CONF_SIM_NUMBER] == "07700900000"
-    assert data[CONF_ICCID] == "89440000000000000000"
     # The refreshed session must be stored, not the input cookie.
     assert data[CONF_SESSION_COOKIE] == "mozillion_session=abc; XSRF-TOKEN=xyz"
-    assert data[CONF_SCAN_INTERVAL] == DEFAULT_SCAN_INTERVAL
+    assert result["options"] == {CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL}
+    for sim_key in (CONF_SIM_META_ID, CONF_ORDER_DETAIL_ID, CONF_SIM_NUMBER):
+        assert sim_key not in data, f"{sim_key} belongs on the SIM, not the account"
+
+    subentries = result["subentries"]
+    assert len(subentries) == 1
+    subentry = subentries[0]
+    assert subentry["subentry_type"] == SUBENTRY_TYPE_SIM
+    assert subentry["title"] == MOCK_SIM.display_name
+    assert subentry["unique_id"] == "7654321"
+    assert subentry["data"][CONF_ORDER_DETAIL_ID] == "1234567"
+    assert subentry["data"][CONF_SIM_NUMBER] == "07700900000"
+    assert subentry["data"][CONF_ICCID] == "89440000000000000000"
 
 
-async def test_entry_is_unique_per_sim(hass: HomeAssistant) -> None:
-    """Configuring the same SIM twice must abort, not duplicate."""
+async def test_entry_is_unique_per_account(hass: HomeAssistant) -> None:
+    """Adding the same account twice aborts; further SIMs go on the first entry."""
     client = _mock_client()
 
     with patch(CLIENT, return_value=client):
@@ -175,10 +186,9 @@ async def test_entry_is_unique_per_sim(hass: HomeAssistant) -> None:
         second = await hass.config_entries.flow.async_configure(
             second["flow_id"], _login_input()
         )
-        second = await hass.config_entries.flow.async_configure(
-            second["flow_id"], {"sim": MOCK_SIM.display_name}
-        )
 
+    # The account is recognised at the login step, before any SIM is chosen: the
+    # extra SIM belongs on the entry that already exists.
     assert second["type"] == data_entry_flow.FlowResultType.ABORT
     assert second["reason"] == "already_configured"
 
@@ -252,8 +262,10 @@ async def test_manual_ids_creates_the_entry(hass: HomeAssistant) -> None:
         )
 
     assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
-    assert result["data"][CONF_SIM_META_ID] == "7654321"
-    assert result["title"] == "Mozillion 07700900000"
+    subentry = result["subentries"][0]
+    assert subentry["data"][CONF_SIM_META_ID] == "7654321"
+    assert subentry["data"][CONF_ORDER_DETAIL_ID] == "1234567"
+    assert subentry["title"] == "07700900000"
 
 
 async def test_manual_ids_are_validated_against_the_api(
@@ -375,26 +387,25 @@ async def test_options_flow_updates_scan_interval(hass: HomeAssistant) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_reconfigure_switches_to_another_sim(hass: HomeAssistant) -> None:
-    """Reconfiguring must update the entry in place, not create a second one."""
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="Mozillion 07700900000",
-        data=dict(MOCK_ENTRY_DATA_COOKIE),
-        unique_id="7654321",
-        version=2,
+async def test_reconfigure_updates_credentials_and_keeps_the_sims(
+    hass: HomeAssistant,
+) -> None:
+    """Reconfiguring the account must not disturb the SIMs hanging off it.
+
+    Switching which SIM is tracked is the SIM subentry's own reconfigure step, so
+    this one only deals with credentials.
+    """
+    entry = _make_config_entry(
+        data={
+            **MOCK_ENTRY_DATA_COOKIE,
+            CONF_EMAIL: "old@example.com",
+            CONF_PASSWORD: "old-secret",
+        }
     )
     entry.add_to_hass(hass)
+    subentries_before = dict(entry.subentries)
 
-    other = MozillionSim(
-        sim_meta_id="55555",
-        order_detail_id="11111",
-        sim_number="07700000001",
-        plan_data_tariff="50GB",
-    )
-    client = _mock_client(sims=[MOCK_SIM, other])
-
-    with patch(CLIENT, return_value=client):
+    with patch(CLIENT, return_value=_mock_client()):
         result = await hass.config_entries.flow.async_init(
             DOMAIN,
             context={
@@ -402,26 +413,18 @@ async def test_reconfigure_switches_to_another_sim(hass: HomeAssistant) -> None:
                 "entry_id": entry.entry_id,
             },
         )
-        assert result["type"] == data_entry_flow.FlowResultType.FORM
         assert result["step_id"] == "reconfigure_confirm"
 
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _credentials_only(_cookie_input())
-        )
-        assert result["step_id"] == "select_sim"
-
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {"sim": other.display_name}
+            result["flow_id"], _credentials_only(_login_input())
         )
 
     assert result["type"] == data_entry_flow.FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
-
-    assert entry.data[CONF_SIM_META_ID] == "55555"
-    assert entry.data[CONF_ORDER_DETAIL_ID] == "11111"
-    assert entry.unique_id == "55555"
-    assert entry.title == "07700000001 (50GB)"
-    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+    assert entry.data[CONF_EMAIL] == "user@example.com"
+    assert entry.data[CONF_PASSWORD] == "secret123"
+    assert dict(entry.subentries) == subentries_before
+    assert entry.version == 3
 
 
 async def test_reconfigure_rejects_a_failed_login(hass: HomeAssistant) -> None:
@@ -450,41 +453,3 @@ async def test_reconfigure_rejects_a_failed_login(hass: HomeAssistant) -> None:
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "reconfigure_confirm"
     assert result["errors"]["base"] == "cannot_connect"
-
-
-async def test_reconfigure_migrates_a_v1_entry(hass: HomeAssistant) -> None:
-    """Reconfigure is the rescue path for an entry that could not migrate.
-
-    It collects the ids the migration would have discovered, so it must also
-    move the entry onto the current version -- otherwise setup would try to
-    migrate all over again and fail the same way.
-    """
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="Mozillion 07700900000",
-        data={k: v for k, v in MOCK_ENTRY_DATA_COOKIE.items() if k != CONF_SIM_META_ID},
-        unique_id="1234567",
-        version=1,
-    )
-    entry.add_to_hass(hass)
-    assert entry.version == 1
-
-    with patch(CLIENT, return_value=_mock_client()):
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN,
-            context={
-                "source": config_entries.SOURCE_RECONFIGURE,
-                "entry_id": entry.entry_id,
-            },
-        )
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _credentials_only(_cookie_input())
-        )
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {"sim": MOCK_SIM.display_name}
-        )
-
-    assert result["type"] == data_entry_flow.FlowResultType.ABORT
-    assert entry.version == 2
-    assert entry.data[CONF_SIM_META_ID] == "7654321"
-    assert entry.unique_id == "7654321"

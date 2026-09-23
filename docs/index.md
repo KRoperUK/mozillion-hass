@@ -6,8 +6,9 @@ and whether the plan is unlimited.
 
 ## Supported devices
 
-Any active Mozillion SIM (UK) that appears on the Mozillion dashboard. Each SIM
-needs its own config entry, so a multi-SIM account gets one device per SIM.
+Any active Mozillion SIM (UK) that appears on the Mozillion dashboard. One entry
+covers the whole account and each SIM is added to it, so a multi-SIM account gets one
+device per SIM while your credentials are stored once.
 
 The integration is cloud-only: it reads the same dashboard and JSON endpoints
 the Mozillion website itself uses, so it works anywhere Home Assistant can

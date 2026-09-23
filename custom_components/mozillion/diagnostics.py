@@ -1,4 +1,8 @@
-"""Diagnostics support for the Mozillion integration."""
+"""Diagnostics support for the Mozillion integration.
+
+The entry is the account and each SIM is a subentry, so this reports both: what the
+account holds, what each SIM holds, and how each SIM's poll is doing.
+"""
 
 from __future__ import annotations
 
@@ -35,7 +39,7 @@ async def async_get_config_entry_diagnostics(
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
 
-    coordinator = entry.runtime_data.coordinator
+    runtime = entry.runtime_data
 
     return async_redact_data(
         {
@@ -45,13 +49,26 @@ async def async_get_config_entry_diagnostics(
                 "data": dict(entry.data),
                 "options": dict(entry.options),
             },
-            "coordinator": {
-                "last_update_success": coordinator.last_update_success,
-                "last_exception": str(coordinator.last_exception)
-                if coordinator.last_exception
-                else None,
-                "update_interval": str(coordinator.update_interval),
-                "data": coordinator.data,
+            "subentries": {
+                subentry_id: {
+                    "type": subentry.subentry_type,
+                    "title": subentry.title,
+                    "data": dict(subentry.data),
+                }
+                for subentry_id, subentry in entry.subentries.items()
+            },
+            "coordinators": {
+                subentry_id: {
+                    "last_update_success": coordinator.last_update_success,
+                    "last_exception": (
+                        str(coordinator.last_exception)
+                        if coordinator.last_exception
+                        else None
+                    ),
+                    "update_interval": str(coordinator.update_interval),
+                    "data": coordinator.data,
+                }
+                for subentry_id, coordinator in runtime.coordinators.items()
             },
         },
         TO_REDACT,

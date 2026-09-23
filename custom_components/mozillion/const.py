@@ -2,6 +2,10 @@
 
 DOMAIN = "mozillion"
 
+# The config entry is the Mozillion *account*; each SIM on it is a subentry of
+# this type, so credentials are stored once however many SIMs are tracked.
+SUBENTRY_TYPE_SIM = "sim"
+
 BASE_URL = "https://www.mozillion.com"
 LOGIN_PATH = "/login"
 LOGIN_POST_PATH = "/login-post"

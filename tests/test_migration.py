@@ -8,6 +8,7 @@ import pytest
 from custom_components.mozillion import CONFIG_ENTRY_VERSION, async_migrate_entry
 from custom_components.mozillion.api import MozillionAuthError, MozillionSim
 from custom_components.mozillion.const import (
+    ATTR_USAGE,
     CONF_ICCID,
     CONF_ORDER_DETAIL_ID,
     CONF_SESSION_COOKIE,
@@ -17,9 +18,10 @@ from custom_components.mozillion.const import (
     DOMAIN,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from tests.conftest import MOCK_ENTRY_DATA_LOGIN, MOCK_SIM
+from tests.conftest import MOCK_ENTRY_DATA_LOGIN, MOCK_SIM, sim_subentry
 
 pytestmark = pytest.mark.asyncio
 
@@ -40,6 +42,9 @@ def _legacy_entry(
         **MOCK_ENTRY_DATA_LOGIN,
         CONF_SESSION_COOKIE: "mozillion_session=old",
         CONF_XSRF_TOKEN: "old-xsrf",
+        # A v1 entry held these on the entry; v3 moves them into a SIM subentry.
+        CONF_ORDER_DETAIL_ID: "1234567",
+        CONF_SIM_NUMBER: "07700900000",
         "sim_plan_id": "1234",
         "usage_key": "usedData",
         "remaining_key": "totalData",
@@ -70,9 +75,9 @@ class TestMigrateToV2:
             assert await async_migrate_entry(hass, entry) is True
 
         assert entry.version == CONFIG_ENTRY_VERSION
-        assert entry.data[CONF_SIM_META_ID] == "7654321"
-        assert entry.data[CONF_ORDER_DETAIL_ID] == "1234567"
-        assert entry.data[CONF_ICCID] == "89440000000000000000"
+        assert sim_subentry(entry).data[CONF_SIM_META_ID] == "7654321"
+        assert sim_subentry(entry).data[CONF_ORDER_DETAIL_ID] == "1234567"
+        assert sim_subentry(entry).data[CONF_ICCID] == "89440000000000000000"
         assert entry.unique_id == "7654321"
         # Legacy keys are gone from both data and options.
         for key in ("sim_plan_id", "usage_key", "remaining_key"):
@@ -119,7 +124,7 @@ class TestMigrateToV2:
         with patch(CLIENT, return_value=client):
             assert await async_migrate_entry(hass, entry) is True
 
-        assert entry.data[CONF_SIM_META_ID] == "7654321"
+        assert sim_subentry(entry).data[CONF_SIM_META_ID] == "7654321"
 
     async def test_ambiguous_multi_sim_account_fails(self, hass: HomeAssistant) -> None:
         """Ambiguity must not silently attach the wrong SIM.
@@ -212,7 +217,7 @@ class TestStaleStoredSession:
 
         client.async_login.assert_awaited_once()
         assert entry.version == CONFIG_ENTRY_VERSION
-        assert entry.data[CONF_SIM_META_ID] == "7654321"
+        assert sim_subentry(entry).data[CONF_SIM_META_ID] == "7654321"
         # The refreshed session must be stored, not the expired one.
         assert entry.data[CONF_SESSION_COOKIE] == "fresh=1"
         assert entry.data[CONF_XSRF_TOKEN] == "new-xsrf"
@@ -291,3 +296,60 @@ class TestStaleStoredSession:
             if flow["context"].get("entry_id") == entry.entry_id
         ]
         assert len(flows) == 1
+
+
+class TestEntityRekey:
+    """Migration re-points the entry's existing entities at the new subentry.
+
+    Rewriting unique_ids rather than letting entities be recreated is what keeps
+    their entity_id -- and so their history and statistics -- through the
+    restructure, so it is worth pinning down.
+    """
+
+    async def test_existing_entities_are_rekeyed_to_the_subentry(
+        self, hass: HomeAssistant
+    ) -> None:
+        entry = _legacy_entry(hass)
+        registry = er.async_get(hass)
+        existing = registry.async_get_or_create(
+            "sensor",
+            DOMAIN,
+            f"{entry.entry_id}_{ATTR_USAGE}",
+            config_entry=entry,
+            suggested_object_id="mozillion_usage",
+        )
+        entity_id = existing.entity_id
+
+        client = MagicMock()
+        client.async_fetch_sims = AsyncMock(return_value=[MOCK_SIM])
+
+        with patch(CLIENT, return_value=client):
+            assert await async_migrate_entry(hass, entry) is True
+
+        subentry = sim_subentry(entry)
+        migrated = registry.async_get(entity_id)
+        assert migrated is not None, "the entity lost its identity in the migration"
+        assert migrated.unique_id == (
+            f"{entry.entry_id}_{subentry.subentry_id}_{ATTR_USAGE}"
+        )
+        assert migrated.config_subentry_id == subentry.subentry_id
+
+    async def test_unrelated_entities_are_left_alone(self, hass: HomeAssistant) -> None:
+        """Only this integration's entities are touched."""
+        entry = _legacy_entry(hass)
+        registry = er.async_get(hass)
+        other = registry.async_get_or_create(
+            "sensor",
+            "someone_else",
+            "not-ours",
+            config_entry=entry,
+            suggested_object_id="not_ours",
+        )
+
+        client = MagicMock()
+        client.async_fetch_sims = AsyncMock(return_value=[MOCK_SIM])
+
+        with patch(CLIENT, return_value=client):
+            assert await async_migrate_entry(hass, entry) is True
+
+        assert registry.async_get(other.entity_id).unique_id == "not-ours"

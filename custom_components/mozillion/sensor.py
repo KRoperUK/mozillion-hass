@@ -12,12 +12,13 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import PERCENTAGE, UnitOfInformation
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
+from . import MozillionConfigEntry
 from .const import (
     ATTR_DAYS_LEFT,
     ATTR_ICCID,
@@ -43,6 +44,7 @@ from .const import (
     ATTR_WALLET,
     ATTR_WALLET_BALANCE,
     ATTR_WALLET_SPEND,
+    SUBENTRY_TYPE_SIM,
 )
 from .coordinator import MozillionCoordinator, wallet_is_active
 from .entity import MozillionEntity
@@ -138,16 +140,23 @@ DATA_SENSORS: tuple[MozillionSensorEntityDescription, ...] = (
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    entry: MozillionConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up Mozillion sensors from config entry."""
+    """Set up a sensor set for every SIM on the account."""
 
-    coordinator = entry.runtime_data.coordinator
+    for subentry in entry.subentries.values():
+        if subentry.subentry_type != SUBENTRY_TYPE_SIM:
+            continue
 
-    async_add_entities(
-        MozillionSensor(coordinator, entry, description) for description in DATA_SENSORS
-    )
+        coordinator = entry.runtime_data.coordinators[subentry.subentry_id]
+        async_add_entities(
+            (
+                MozillionSensor(coordinator, entry, subentry, description)
+                for description in DATA_SENSORS
+            ),
+            config_subentry_id=subentry.subentry_id,
+        )
 
 
 class MozillionSensor(MozillionEntity, SensorEntity):
@@ -159,10 +168,11 @@ class MozillionSensor(MozillionEntity, SensorEntity):
         self,
         coordinator: MozillionCoordinator,
         entry: ConfigEntry,
+        subentry: ConfigSubentry,
         description: MozillionSensorEntityDescription,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator, entry, description.key)
+        super().__init__(coordinator, entry, subentry, description.key)
         self.entity_description = description
 
     @property

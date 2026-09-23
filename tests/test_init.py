@@ -18,6 +18,8 @@ from tests.conftest import (
     MOCK_ENTRY_DATA_COOKIE,
     MOCK_SIM,
     MOCK_WALLET,
+    _make_config_entry,
+    sim_subentry,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -31,13 +33,9 @@ def _enable_custom_integrations(enable_custom_integrations):
 
 
 def _entry(hass: HomeAssistant, **overrides) -> MockConfigEntry:
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="Mozillion 07700900000",
-        data={**MOCK_ENTRY_DATA_COOKIE, **overrides},
-        unique_id="7654321",
-        version=2,
-    )
+    """An account entry with one SIM subentry, as the config flow creates it."""
+
+    entry = _make_config_entry(data={**MOCK_ENTRY_DATA_COOKIE, **overrides})
     entry.add_to_hass(hass)
     return entry
 
@@ -54,6 +52,12 @@ def _client(**overrides) -> MagicMock:
     for key, value in overrides.items():
         setattr(client, key, value)
     return client
+
+
+def _sim_coordinator(entry) -> MozillionCoordinator:
+    """Return the coordinator polling the entry's first SIM."""
+
+    return entry.runtime_data.coordinators[sim_subentry(entry).subentry_id]
 
 
 def _sensors(hass: HomeAssistant) -> dict[str, str]:
@@ -84,7 +88,8 @@ async def test_setup_creates_the_expected_entities(hass: HomeAssistant) -> None:
         await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.LOADED
-    assert entry.runtime_data.coordinator.data[ATTR_USAGE] == 3.5
+    coordinator = _sim_coordinator(entry)
+    assert coordinator.data[ATTR_USAGE] == 3.5
 
     assert _sensor_ending(hass, "_usage").state == "3.5"
     assert _sensor_ending(hass, "_total").state == "10.0"
@@ -172,13 +177,8 @@ async def test_bad_credentials_trigger_reauth(hass: HomeAssistant) -> None:
 
 async def test_scan_interval_drives_the_schedule(hass: HomeAssistant) -> None:
     """The stored scan interval drives the coordinator's schedule."""
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="Mozillion 07700900000",
-        data=dict(MOCK_ENTRY_DATA_COOKIE),
-        options={"scan_interval": 7200},
-        unique_id="7654321",
-        version=2,
+    entry = _make_config_entry(
+        data=dict(MOCK_ENTRY_DATA_COOKIE), options={"scan_interval": 7200}
     )
     entry.add_to_hass(hass)
 
@@ -186,7 +186,7 @@ async def test_scan_interval_drives_the_schedule(hass: HomeAssistant) -> None:
         await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    coordinator: MozillionCoordinator = entry.runtime_data.coordinator
+    coordinator: MozillionCoordinator = _sim_coordinator(entry)
     assert coordinator.update_interval is not None
     assert coordinator.update_interval.total_seconds() == 7200
 
@@ -199,7 +199,7 @@ async def test_coordinator_is_bound_to_the_entry(hass: HomeAssistant) -> None:
         await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    assert entry.runtime_data.coordinator.config_entry is entry
+    assert _sim_coordinator(entry).config_entry is entry
 
 
 async def test_setup_uses_the_configured_credentials(hass: HomeAssistant) -> None:

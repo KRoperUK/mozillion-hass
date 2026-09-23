@@ -21,15 +21,17 @@ from custom_components.mozillion.const import (
     REPAIR_FAILURE_THRESHOLD,
 )
 from custom_components.mozillion.coordinator import MozillionCoordinator
+from custom_components.mozillion.session import MozillionSession
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from tests.conftest import (
     MOCK_API_RESPONSE,
     MOCK_ENTRY_DATA_COOKIE,
     MOCK_SIM,
     MOCK_WALLET,
+    _make_config_entry,
+    sim_subentry,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -124,13 +126,7 @@ def _issue(hass: HomeAssistant):
 
 
 def _coordinator(hass: HomeAssistant) -> tuple[MozillionCoordinator, AsyncMock]:
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="Mozillion 07700900000",
-        data=dict(MOCK_ENTRY_DATA_COOKIE),
-        unique_id="7654321",
-        version=2,
-    )
+    entry = _make_config_entry(data=MOCK_ENTRY_DATA_COOKIE)
     entry.add_to_hass(hass)
 
     client = AsyncMock()
@@ -142,11 +138,12 @@ def _coordinator(hass: HomeAssistant) -> tuple[MozillionCoordinator, AsyncMock]:
         hass=hass,
         client=client,
         entry=entry,
-        cookie_header="mozillion_session=abc",
-        xsrf_header="xyz",
+        subentry=sim_subentry(entry),
+        session=MozillionSession(
+            cookie_header="mozillion_session=abc", xsrf_token="xyz"
+        ),
         update_interval=None,
     )
-    coordinator._reset_poll_state()
     return coordinator, client
 
 

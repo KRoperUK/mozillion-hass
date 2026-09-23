@@ -36,6 +36,8 @@ unlimited.
 
 ## Features
 
+- One entry per Mozillion **account**: credentials are stored once, and every SIM
+  you track is added to it from the integration page
 - Config flow that reads your SIMs from the dashboard and lets you pick one
 - Automated login with email/password and optional TOTP secret (accepts the
   Base32 secret or the whole `otpauth://` link)

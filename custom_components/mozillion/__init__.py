@@ -1,16 +1,29 @@
-"""Setup for the Mozillion integration."""
+"""Setup for the Mozillion integration.
+
+The config entry is the *account*: it holds the credentials and the session. Each SIM
+the account tracks is a subentry of type ``sim``, so adding a second SIM needs no
+second copy of your password, and changing it is done once. A separate coordinator
+polls each SIM, sharing one session through :class:`MozillionSession`.
+"""
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
+from types import MappingProxyType
 from typing import Any
 
 from homeassistant.components.binary_sensor import DOMAIN as BINARY_SENSOR_DOMAIN
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
-from homeassistant.config_entries import SOURCE_RECONFIGURE, ConfigEntry
+from homeassistant.config_entries import (
+    SOURCE_RECONFIGURE,
+    ConfigEntry,
+    ConfigSubentry,
+)
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import MozillionAuthError, MozillionClient, MozillionSim
@@ -29,20 +42,28 @@ from .const import (
     DEFAULT_ORIGIN,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    SUBENTRY_TYPE_SIM,
 )
 from .coordinator import CoordinatorData, MozillionCoordinator
+from .session import MozillionSession
 
 _LOGGER = logging.getLogger(__name__)
 
-CONFIG_ENTRY_VERSION = 2
+CONFIG_ENTRY_VERSION = 3
+
+PLATFORMS = [SENSOR_DOMAIN, BINARY_SENSOR_DOMAIN]
 
 # Keys that existed before the dashboard moved to the sim_meta_id contract.
 _LEGACY_KEYS = ("sim_plan_id", "usage_key", "remaining_key")
+# Keys that describe one SIM. They used to sit on the entry, and belong to a
+# subentry now that one entry can cover several SIMs.
+_SIM_KEYS = (CONF_ORDER_DETAIL_ID, CONF_SIM_META_ID, CONF_SIM_NUMBER, CONF_ICCID)
 
 __all__ = [
     "CONFIG_ENTRY_VERSION",
     "CoordinatorData",
     "MozillionAuthError",
+    "MozillionConfigEntry",
     "MozillionCoordinator",
     "MozillionRuntimeData",
     "async_migrate_entry",
@@ -56,53 +77,77 @@ class MozillionRuntimeData:
     """Objects shared with the entity platforms."""
 
     client: MozillionClient
-    coordinator: MozillionCoordinator
+    session: MozillionSession
+    coordinators: dict[str, MozillionCoordinator] = field(default_factory=dict)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Mozillion from a config entry."""
+type MozillionConfigEntry = ConfigEntry[MozillionRuntimeData]
 
+
+async def async_setup_entry(hass: HomeAssistant, entry: MozillionConfigEntry) -> bool:
+    """Set up the account and one coordinator per SIM."""
+
+    session = MozillionSession.from_entry(entry)
     client = MozillionClient(async_get_clientsession(hass))
-
-    # Authentication is left to the coordinator's first refresh: it already
-    # knows how to log in, and doing it here as well logged in twice.
-    coordinator = MozillionCoordinator(
-        hass=hass,
-        client=client,
-        entry=entry,
-        cookie_header=entry.data.get(CONF_SESSION_COOKIE),
-        xsrf_header=entry.data.get(CONF_XSRF_TOKEN),
-        update_interval=timedelta(
-            seconds=entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
-        ),
+    update_interval = timedelta(
+        seconds=entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     )
 
-    _LOGGER.debug("Starting first refresh for entry %s", entry.entry_id)
-    # Raises ConfigEntryAuthFailed / ConfigEntryNotReady on its own.
-    await coordinator.async_config_entry_first_refresh()
+    subentries = [
+        subentry
+        for subentry in entry.subentries.values()
+        if subentry.subentry_type == SUBENTRY_TYPE_SIM
+    ]
+    if not subentries:
+        raise ConfigEntryError(
+            "This Mozillion account has no SIMs configured. Add one from the "
+            "integration page."
+        )
 
-    entry.runtime_data = MozillionRuntimeData(client=client, coordinator=coordinator)
+    coordinators: dict[str, MozillionCoordinator] = {}
+    for subentry in subentries:
+        coordinator = MozillionCoordinator(
+            hass=hass,
+            client=client,
+            entry=entry,
+            subentry=subentry,
+            session=session,
+            update_interval=update_interval,
+        )
+        # Raises ConfigEntryAuthFailed / ConfigEntryNotReady on its own. The first
+        # SIM to poll logs in; the rest reuse the same session rather than logging
+        # in again.
+        await coordinator.async_config_entry_first_refresh()
+        coordinators[subentry.subentry_id] = coordinator
 
-    await hass.config_entries.async_forward_entry_setups(
-        entry, [SENSOR_DOMAIN, BINARY_SENSOR_DOMAIN]
+    entry.runtime_data = MozillionRuntimeData(
+        client=client, session=session, coordinators=coordinators
     )
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    # Adding, removing or reconfiguring a SIM changes the entity set, so reload.
+    entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     return True
+
+
+async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload when the account's subentries change."""
+
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
 
-    return await hass.config_entries.async_unload_platforms(
-        entry, [SENSOR_DOMAIN, BINARY_SENSOR_DOMAIN]
-    )
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Migrate entries created before Mozillion introduced ``sim_meta_id``.
+    """Migrate older entries onto the account-hub shape.
 
-    The old contract identified a SIM by ``sim_plan_id``; the usage endpoints
-    now take the dashboard's ``sim_meta_id`` instead. Nothing in the stored
-    entry maps onto it, so the SIM list is re-read from the dashboard.
+    Version 2 introduced the ``sim_meta_id`` contract; version 3 moved a SIM's ids
+    off the entry and into a subentry, so one entry can hold an account's worth of
+    SIMs and the credentials live in one place.
     """
 
     if entry.version > CONFIG_ENTRY_VERSION:
@@ -123,7 +168,99 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.version,
         CONFIG_ENTRY_VERSION,
     )
-    return await _async_migrate_to_v2(hass, entry)
+
+    if entry.version == 1 and not await _async_migrate_to_v2(hass, entry):
+        return False
+
+    return await _async_migrate_to_v3(hass, entry)
+
+
+async def _async_migrate_to_v3(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Move the entry's SIM into a subentry."""
+
+    data = dict(entry.data)
+    sim_data = {key: data.pop(key, "") for key in _SIM_KEYS}
+    for key in _LEGACY_KEYS:
+        data.pop(key, None)
+
+    sim_meta_id = str(sim_data.get(CONF_SIM_META_ID) or "").strip()
+    if not sim_meta_id:
+        _LOGGER.error(
+            "Cannot migrate Mozillion entry %s: it holds no SIM to move into a "
+            "subentry. Reconfigure the integration.",
+            entry.entry_id,
+        )
+        await _async_prompt_reconfigure(hass, entry)
+        return False
+
+    sim_number = str(sim_data.get(CONF_SIM_NUMBER) or "").strip()
+    subentry = ConfigSubentry(
+        data=MappingProxyType(dict(sim_data)),
+        subentry_type=SUBENTRY_TYPE_SIM,
+        # The entry title used to be the SIM's name; that name belongs to the SIM.
+        title=sim_number or entry.title,
+        unique_id=sim_meta_id,
+    )
+
+    # Subentries have their own API -- async_update_entry does not take them.
+    # Adding it first also means a duplicate SIM unique_id aborts the migration
+    # before anything is written.
+    if not hass.config_entries.async_add_subentry(entry, subentry):
+        _LOGGER.error(
+            "Cannot migrate Mozillion entry %s: the SIM subentry was refused",
+            entry.entry_id,
+        )
+        return False
+    hass.config_entries.async_update_entry(
+        entry,
+        data=data,
+        version=CONFIG_ENTRY_VERSION,
+    )
+
+    _async_rekey_entities(hass, entry, subentry.subentry_id)
+    _LOGGER.info(
+        "Migrated Mozillion entry %s to an account with SIM %s",
+        entry.entry_id,
+        sim_meta_id,
+    )
+    return True
+
+
+def _async_rekey_entities(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    subentry_id: str,
+) -> None:
+    """Re-point the entry's existing entities at its new subentry.
+
+    Every entity this integration creates is keyed ``<entry_id>_<suffix>``, so the
+    subentry id is inserted after the entry id rather than matched against a list of
+    known suffixes, which would drift the first time an entity was added.
+
+    Rewriting ``unique_id`` rather than letting the entities be recreated keeps their
+    ``entity_id``, and so their history and statistics, across the restructure.
+    """
+
+    registry = er.async_get(hass)
+    prefix = f"{entry.entry_id}_"
+    for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
+        unique_id = entity.unique_id or ""
+        if not unique_id.startswith(prefix):
+            continue
+        try:
+            registry.async_update_entity(
+                entity.entity_id,
+                new_unique_id=f"{prefix}{subentry_id}_{unique_id[len(prefix) :]}",
+                config_subentry_id=subentry_id,
+            )
+        except ValueError as err:
+            # A collision would already be a broken registry; say so and carry on
+            # rather than failing the whole migration.
+            _LOGGER.warning(
+                "Could not re-key Mozillion entity %s during migration: %s",
+                entity.entity_id,
+                err,
+            )
 
 
 async def _async_migrate_to_v2(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -228,7 +365,7 @@ async def _async_migrate_to_v2(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data=data,
         options=options,
         unique_id=sim.sim_meta_id,
-        version=CONFIG_ENTRY_VERSION,
+        version=2,
     )
     _LOGGER.info(
         "Migrated Mozillion entry %s to SIM %s", entry.entry_id, sim.sim_meta_id
@@ -239,10 +376,9 @@ async def _async_migrate_to_v2(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_prompt_reconfigure(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Ask the user to re-enter their details, since migration cannot proceed.
 
-    Migration returns ``False`` on failure, which only leaves a log line the user
-    never sees. Starting the reconfigure flow gives them a UI path back instead
-    of a silently dead entry -- the reconfigure step writes the same ids the
-    migration would have discovered.
+    Migration returning ``False`` on failure only leaves a log line the user never
+    sees. Starting the reconfigure flow gives them a UI path back instead of a
+    silently dead entry.
     """
 
     try:
