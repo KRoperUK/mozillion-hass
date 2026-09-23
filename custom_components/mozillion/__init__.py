@@ -193,24 +193,42 @@ async def _async_migrate_to_v3(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await _async_prompt_reconfigure(hass, entry)
         return False
 
-    sim_number = str(sim_data.get(CONF_SIM_NUMBER) or "").strip()
-    subentry = ConfigSubentry(
-        data=MappingProxyType(dict(sim_data)),
-        subentry_type=SUBENTRY_TYPE_SIM,
-        # The entry title used to be the SIM's name; that name belongs to the SIM.
-        title=sim_number or entry.title,
-        unique_id=sim_meta_id,
+    # Adding the subentry and bumping the version are two separate registry
+    # writes, so a previous attempt can have been interrupted between them. Resume
+    # instead of failing: `async_add_subentry` raises AbortFlow for a duplicate
+    # unique_id rather than returning False, so re-adding would leave the entry
+    # stuck at its old version, failing on every startup.
+    subentry = next(
+        (
+            existing
+            for existing in entry.subentries.values()
+            if existing.subentry_type == SUBENTRY_TYPE_SIM
+            and existing.unique_id == sim_meta_id
+        ),
+        None,
     )
-
-    # Subentries have their own API -- async_update_entry does not take them.
-    # Adding it first also means a duplicate SIM unique_id aborts the migration
-    # before anything is written.
-    if not hass.config_entries.async_add_subentry(entry, subentry):
-        _LOGGER.error(
-            "Cannot migrate Mozillion entry %s: the SIM subentry was refused",
+    if subentry is not None:
+        _LOGGER.info(
+            "Mozillion entry %s already holds the SIM subentry; finishing the "
+            "migration",
             entry.entry_id,
         )
-        return False
+    else:
+        sim_number = str(sim_data.get(CONF_SIM_NUMBER) or "").strip()
+        subentry = ConfigSubentry(
+            data=MappingProxyType(dict(sim_data)),
+            subentry_type=SUBENTRY_TYPE_SIM,
+            # The entry title used to be the SIM's name; that name belongs to the SIM.
+            title=sim_number or entry.title,
+            unique_id=sim_meta_id,
+        )
+        # Subentries have their own API -- async_update_entry does not take them.
+        if not hass.config_entries.async_add_subentry(entry, subentry):
+            _LOGGER.error(
+                "Cannot migrate Mozillion entry %s: the SIM subentry was refused",
+                entry.entry_id,
+            )
+            return False
     hass.config_entries.async_update_entry(
         entry,
         data=data,

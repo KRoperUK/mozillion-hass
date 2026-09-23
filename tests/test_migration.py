@@ -21,7 +21,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from tests.conftest import MOCK_ENTRY_DATA_LOGIN, MOCK_SIM, sim_subentry
+from tests.conftest import (
+    MOCK_ENTRY_DATA_LOGIN,
+    MOCK_SIM,
+    _sim_subentry_data,
+    sim_subentry,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -34,7 +39,10 @@ def _enable_custom_integrations(enable_custom_integrations):
 
 
 def _legacy_entry(
-    hass: HomeAssistant, version: int = 1, **overrides
+    hass: HomeAssistant,
+    version: int = 1,
+    subentries: list[dict] | None = None,
+    **overrides,
 ) -> MockConfigEntry:
     """An entry as written by the pre-sim_meta_id config flow."""
 
@@ -58,6 +66,7 @@ def _legacy_entry(
         data=data,
         unique_id="1234567",
         version=version,
+        subentries_data=subentries,
     )
     entry.add_to_hass(hass)
     return entry
@@ -142,7 +151,23 @@ class TestMigrateToV2:
         client.async_fetch_sims = AsyncMock(return_value=[other, MOCK_SIM])
 
         with patch(CLIENT, return_value=client):
-            assert await async_migrate_entry(hass, entry) is False
+            result = await async_migrate_entry(hass, entry)
+        after = hass.config_entries.async_get_entry(entry.entry_id)
+        print("DEBUG migration returned:", result)
+        print(
+            "DEBUG local entry: version",
+            entry.version,
+            "subentries",
+            len(entry.subentries),
+        )
+        print(
+            "DEBUG registry entry: version",
+            after.version,
+            "subentries",
+            len(after.subentries),
+        )
+        print("DEBUG same object after:", after is entry)
+        assert result is False
 
         assert entry.version == 1
         assert CONF_SIM_META_ID not in entry.data
@@ -353,3 +378,32 @@ class TestEntityRekey:
             assert await async_migrate_entry(hass, entry) is True
 
         assert registry.async_get(other.entity_id).unique_id == "not-ours"
+
+
+class TestResumeInterruptedMigration:
+    """A migration interrupted between its two registry writes."""
+
+    async def test_an_interrupted_migration_resumes(self, hass: HomeAssistant) -> None:
+        """The subentry is added before the version is bumped, as separate writes.
+
+        An attempt interrupted between them leaves a version 2 entry that already
+        holds the SIM subentry. ``async_add_subentry`` raises AbortFlow for a
+        duplicate unique_id rather than returning False, so without a resume path
+        the retry would fail and the entry would stay broken on every startup.
+        """
+        entry = _legacy_entry(
+            hass,
+            version=2,
+            subentries=[_sim_subentry_data()],
+            **{CONF_SIM_META_ID: MOCK_SIM.sim_meta_id},
+        )
+
+        assert await async_migrate_entry(hass, entry) is True
+
+        assert entry.version == CONFIG_ENTRY_VERSION
+        # The existing subentry is kept, not duplicated.
+        assert len(entry.subentries) == 1
+        assert sim_subentry(entry).unique_id == MOCK_SIM.sim_meta_id
+        # And the SIM's ids are no longer on the entry.
+        assert CONF_SIM_META_ID not in entry.data
+        assert CONF_ORDER_DETAIL_ID not in entry.data

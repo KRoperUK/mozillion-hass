@@ -215,3 +215,22 @@ async def test_setup_uses_the_configured_credentials(hass: HomeAssistant) -> Non
     # coordinator's first refresh authenticate again.
     client.async_login.assert_awaited_once()
     assert entry.state is ConfigEntryState.LOADED
+
+
+async def test_an_account_with_no_sims_is_a_setup_error(
+    hass: HomeAssistant,
+) -> None:
+    """An account entry with no SIM has nothing to poll, and says so.
+
+    Raising ConfigEntryError rather than returning False puts the entry in
+    SETUP_ERROR, which surfaces the reason instead of a silent failure.
+    """
+
+    entry = _make_config_entry(subentries=[])
+    entry.add_to_hass(hass)
+
+    with patch(CLIENT, return_value=_client()):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_ERROR

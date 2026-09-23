@@ -71,7 +71,7 @@ filterwarnings = [
 [tool.coverage.run]
 branch = true
 source = ["custom_components/mozillion"]
-omit = ["tests/*", "custom_components/mozillion/__pycache__/*", "custom_components/mozillion/__init__.py"]
+omit = ["tests/*", "custom_components/mozillion/__pycache__/*"]
 
 [tool.coverage.report]
 show_missing = true
