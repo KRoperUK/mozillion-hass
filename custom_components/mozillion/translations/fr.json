@@ -63,6 +63,47 @@
       "reconfigure_successful": "Reconfiguration réussie."
     }
   },
+  "config_subentries": {
+    "sim": {
+      "initiate_flow": {
+        "user": "Ajouter une SIM",
+        "reconfigure": "Changer de SIM"
+      },
+      "step": {
+        "user": {
+          "title": "Ajouter une SIM",
+          "description": "Choisissez une autre SIM de ce compte à suivre.",
+          "data": {
+            "sim": "SIM"
+          }
+        },
+        "manual_ids": {
+          "title": "Saisir les identifiants manuellement",
+          "description": "Saisissez l'identifiant de commande et l'identifiant méta de la SIM. Les deux figurent dans le sélecteur de SIM du tableau de bord Mozillion.",
+          "data": {
+            "order_detail_id": "Identifiant de commande",
+            "sim_meta_id": "Identifiant méta de la SIM",
+            "sim_number": "Numéro de la SIM (facultatif)"
+          }
+        },
+        "reconfigure": {
+          "title": "Changer de SIM",
+          "description": "Choisissez une autre SIM pour cet appareil. L'appareil et son historique sont conservés.",
+          "data": {
+            "sim": "SIM"
+          }
+        }
+      },
+      "error": {
+        "cannot_connect": "Impossible de joindre Mozillion ou de confirmer la SIM. Vérifiez la connexion et réessayez."
+      },
+      "abort": {
+        "entry_not_loaded": "Le compte Mozillion n'est pas en cours d'exécution, une SIM ne peut donc pas être ajoutée. Démarrez l'intégration et réessayez.",
+        "no_new_sims": "Toutes les SIM de ce compte sont déjà suivies.",
+        "reconfigure_successful": "La SIM a été changée."
+      }
+    }
+  },
   "options": {
     "step": {
       "init": {

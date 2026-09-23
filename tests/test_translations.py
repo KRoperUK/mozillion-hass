@@ -22,6 +22,7 @@ import pytest
 from custom_components.mozillion.config_flow import (
     MozillionConfigFlow,
     MozillionOptionsFlowHandler,
+    SimSubentryFlowHandler,
 )
 from custom_components.mozillion.sensor import DATA_SENSORS
 
@@ -37,8 +38,16 @@ NON_FORM_STEPS = {"import", "reauth", "reconfigure"}
 
 LANGUAGES = sorted(path.stem for path in TRANSLATIONS_DIR.glob("*.json"))
 
-# Strings that are legitimately the same in every language.
-UNIVERSAL = {"config.step.user.title", "config.step.select_sim.data.sim"}
+# Strings that are legitimately the same in every language. "SIM" is an acronym
+# and "Mozillion" is a brand, so neither is translated.
+UNIVERSAL = {
+    "config.step.user.title",
+    "config.step.select_sim.data.sim",
+    "config_subentries.sim.step.user.data.sim",
+    "config_subentries.sim.step.reconfigure.data.sim",
+}
+
+SUBENTRY_TYPE = "sim"
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -57,7 +66,7 @@ def _flatten(node: Any, prefix: str = "") -> dict[str, str]:
     return flat
 
 
-def _step_ids(flow: type) -> set[str]:
+def _step_ids(flow: type, non_form: set[str] = NON_FORM_STEPS) -> set[str]:
     """Return the form step ids a flow defines itself.
 
     ``vars()`` rather than ``dir()``: Home Assistant's base ``ConfigFlow``
@@ -69,7 +78,7 @@ def _step_ids(flow: type) -> set[str]:
         for name in vars(flow)
         if name.startswith("async_step_")
     }
-    return names - NON_FORM_STEPS
+    return names - non_form
 
 
 @pytest.fixture(scope="module")
@@ -103,6 +112,37 @@ def test_every_config_flow_form_is_translatable(strings) -> None:
         f"options flow/translation mismatch: forms={sorted(options_forms)} "
         f"translated={sorted(options_steps)}"
     )
+
+
+def test_every_subentry_flow_form_is_translatable(strings) -> None:
+    """The subentry flow needs its own strings, under its own key.
+
+    Home Assistant looks subentry flows up under ``config_subentries`` keyed by
+    subentry type -- a separate namespace from ``config``, which is why the
+    subentry dialogs shipped untranslated while this file passed.
+
+    ``non_form`` is empty here on purpose: unlike the config flow, whose
+    ``reconfigure`` step only delegates to ``reconfigure_confirm``, the subentry
+    flow's ``reconfigure`` step is the form the user fills in.
+    """
+    subentry = strings["config_subentries"][SUBENTRY_TYPE]
+
+    assert _step_ids(SimSubentryFlowHandler, non_form=set()) == set(subentry["step"])
+    assert "user" in subentry["initiate_flow"], "the Add a SIM button needs a label"
+
+
+def test_subentry_flow_reason_strings_are_translated(strings) -> None:
+    """Abort and error reasons the subentry flow can raise must have text.
+
+    ``reconfigure_successful`` comes from Home Assistant's own
+    ``async_update_and_abort``, not from this repository, so it is easy to miss.
+    """
+    subentry = strings["config_subentries"][SUBENTRY_TYPE]
+
+    assert {"entry_not_loaded", "no_new_sims", "reconfigure_successful"} <= set(
+        subentry["abort"]
+    )
+    assert "cannot_connect" in subentry["error"]
 
 
 def test_every_entity_is_translatable(strings) -> None:
