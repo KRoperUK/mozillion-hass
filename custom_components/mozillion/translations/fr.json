@@ -65,6 +65,7 @@
   },
   "config_subentries": {
     "sim": {
+      "entry_type": "SIM",
       "initiate_flow": {
         "user": "Ajouter une SIM",
         "reconfigure": "Changer de SIM"

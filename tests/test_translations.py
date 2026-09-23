@@ -43,6 +43,7 @@ LANGUAGES = sorted(path.stem for path in TRANSLATIONS_DIR.glob("*.json"))
 UNIVERSAL = {
     "config.step.user.title",
     "config.step.select_sim.data.sim",
+    "config_subentries.sim.entry_type",
     "config_subentries.sim.step.user.data.sim",
     "config_subentries.sim.step.reconfigure.data.sim",
 }
@@ -129,6 +130,14 @@ def test_every_subentry_flow_form_is_translatable(strings) -> None:
 
     assert _step_ids(SimSubentryFlowHandler, non_form=set()) == set(subentry["step"])
     assert "user" in subentry["initiate_flow"], "the Add a SIM button needs a label"
+
+    # hassfest requires this key and says so precisely:
+    #   Invalid strings.json: required key not provided at
+    #   'config_subentries.sim.entry_type'. Got None
+    # The developer docs call entry_type optional, so nothing but the validator
+    # catches its absence. The CI hacs_validate job is the authority on the rest
+    # of the schema; this only pins the requirement that actually bit.
+    assert subentry["entry_type"], "hassfest requires entry_type on a subentry type"
 
 
 def test_subentry_flow_reason_strings_are_translated(strings) -> None:
