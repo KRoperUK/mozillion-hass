@@ -1,4 +1,8 @@
-"""Shared fixtures for Mozillion integration tests."""
+"""Shared fixtures for Mozillion integration tests.
+
+The config entry is the *account* (credentials and session); each SIM is a subentry of
+type ``sim``, mirroring how the integration is actually structured.
+"""
 
 from __future__ import annotations
 
@@ -47,8 +51,11 @@ from custom_components.mozillion.const import (
     CONF_XSRF_TOKEN,
     DEFAULT_ORIGIN,
     DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    SUBENTRY_TYPE_SIM,
 )
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 # ---------------------------------------------------------------------------
 # Sample data returned by the Mozillion usage endpoints
@@ -128,17 +135,13 @@ MOCK_WALLET_INACTIVE: dict[str, Any] = {
 
 
 # ---------------------------------------------------------------------------
-# Config entry data that mirrors what the config flow produces
+# Config entry data: the account, plus one SIM subentry
 # ---------------------------------------------------------------------------
 MOCK_ENTRY_DATA_LOGIN: dict[str, Any] = {
     CONF_EMAIL: "user@example.com",
     CONF_PASSWORD: "secret123",
     CONF_TOTP_SECRET: "",
     CONF_ORIGIN: DEFAULT_ORIGIN,
-    CONF_ORDER_DETAIL_ID: "1234567",
-    CONF_SIM_META_ID: "7654321",
-    CONF_SIM_NUMBER: "07700900000",
-    CONF_ICCID: "89440000000000000000",
     CONF_SESSION_COOKIE: "",
     CONF_XSRF_TOKEN: "",
     CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
@@ -152,9 +155,28 @@ MOCK_ENTRY_DATA_COOKIE: dict[str, Any] = {
     CONF_XSRF_TOKEN: "xyz",
 }
 
+MOCK_SIM_SUBENTRY_DATA: dict[str, Any] = {
+    CONF_ORDER_DETAIL_ID: "1234567",
+    CONF_SIM_META_ID: "7654321",
+    CONF_SIM_NUMBER: "07700900000",
+    CONF_ICCID: "89440000000000000000",
+}
+
+
+def _sim_subentry_data(**overrides: Any) -> dict[str, Any]:
+    """Build a flow-style SIM subentry payload for MockConfigEntry."""
+
+    data = {**MOCK_SIM_SUBENTRY_DATA, **overrides}
+    return {
+        "subentry_type": SUBENTRY_TYPE_SIM,
+        "data": data,
+        "title": data.get(CONF_SIM_NUMBER) or "SIM",
+        "unique_id": data[CONF_SIM_META_ID],
+    }
+
 
 # ---------------------------------------------------------------------------
-# Coordinator data that the coordinator would produce from MOCK_API_RESPONSE
+# Coordinator data the coordinator produces from MOCK_API_RESPONSE
 # ---------------------------------------------------------------------------
 MOCK_COORDINATOR_DATA: dict[str, Any] = {
     ATTR_RAW: MOCK_API_RESPONSE,
@@ -210,26 +232,43 @@ def _make_config_entry(
     data: dict[str, Any] | None = None,
     options: dict[str, Any] | None = None,
     entry_id: str = "test_entry_id",
-) -> ConfigEntry:
-    """Create a mock ConfigEntry."""
-    entry = MagicMock(spec=ConfigEntry)
-    entry.entry_id = entry_id
-    entry.data = data or MOCK_ENTRY_DATA_COOKIE
-    entry.options = options or {}
-    entry.version = 2
-    entry.unique_id = entry.data.get(CONF_SIM_META_ID, entry_id)
-    entry.title = "Mozillion"
-    return entry
+    version: int = 3,
+    subentries: list[dict[str, Any]] | None = None,
+) -> MockConfigEntry:
+    """Create a mock account entry with one SIM subentry by default."""
+
+    entry_data = data if data is not None else MOCK_ENTRY_DATA_COOKIE
+    return MockConfigEntry(
+        domain=DOMAIN,
+        data=entry_data,
+        options=options or {},
+        entry_id=entry_id,
+        version=version,
+        unique_id=entry_data.get(CONF_EMAIL) or "account",
+        subentries_data=(
+            subentries if subentries is not None else [_sim_subentry_data()]
+        ),
+    )
+
+
+def sim_subentry(entry: ConfigEntry) -> ConfigSubentry:
+    """Return the entry's first SIM subentry."""
+
+    return next(
+        subentry
+        for subentry in entry.subentries.values()
+        if subentry.subentry_type == SUBENTRY_TYPE_SIM
+    )
 
 
 @pytest.fixture
-def mock_config_entry() -> ConfigEntry:
+def mock_config_entry() -> MockConfigEntry:
     """Return a mock config entry using cookie auth."""
     return _make_config_entry(data=MOCK_ENTRY_DATA_COOKIE)
 
 
 @pytest.fixture
-def mock_config_entry_login() -> ConfigEntry:
+def mock_config_entry_login() -> MockConfigEntry:
     """Return a mock config entry using login auth."""
     return _make_config_entry(data=MOCK_ENTRY_DATA_LOGIN)
 

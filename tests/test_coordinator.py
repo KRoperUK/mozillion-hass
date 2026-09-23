@@ -36,19 +36,15 @@ from custom_components.mozillion.const import (
     ATTR_WALLET_BALANCE,
     ATTR_WALLET_SPEND,
     AUTH_REFRESH_THRESHOLD,
-    CONF_EMAIL,
     CONF_ORDER_DETAIL_ID,
-    CONF_ORIGIN,
-    CONF_PASSWORD,
     CONF_SESSION_COOKIE,
     CONF_SIM_META_ID,
-    CONF_TOTP_SECRET,
     CONF_XSRF_TOKEN,
     DASHBOARD_REFRESH_INTERVAL,
-    DEFAULT_ORIGIN,
     REPAIR_FAILURE_THRESHOLD,
 )
 from custom_components.mozillion.coordinator import wallet_is_active
+from custom_components.mozillion.session import MozillionSession
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
@@ -59,8 +55,10 @@ from tests.conftest import (
     MOCK_ENTRY_DATA_COOKIE,
     MOCK_ENTRY_DATA_LOGIN,
     MOCK_SIM,
+    MOCK_SIM_SUBENTRY_DATA,
     MOCK_WALLET,
     _make_config_entry,
+    sim_subentry,
 )
 
 
@@ -103,12 +101,8 @@ def _make_coordinator_for_entry(
     coordinator = MozillionCoordinator.__new__(MozillionCoordinator)
     coordinator.client = client
     coordinator.config_entry = entry
-    coordinator.cookie_header = cookie
-    coordinator.xsrf_header = xsrf
-    coordinator.email = entry.data.get(CONF_EMAIL)
-    coordinator.password = entry.data.get(CONF_PASSWORD)
-    coordinator.totp_secret = entry.data.get(CONF_TOTP_SECRET) or None
-    coordinator.origin = entry.data.get(CONF_ORIGIN, DEFAULT_ORIGIN)
+    coordinator.subentry = sim_subentry(entry)
+    coordinator.session = MozillionSession(cookie_header=cookie, xsrf_token=xsrf)
     coordinator._reset_poll_state()
     coordinator.hass = hass
     return coordinator
@@ -144,8 +138,8 @@ class TestCoordinatorUpdate:
         await coordinator._async_update_data()
 
         kwargs = client.async_get_usage.call_args.kwargs
-        assert kwargs["order_detail_id"] == MOCK_ENTRY_DATA_COOKIE[CONF_ORDER_DETAIL_ID]
-        assert kwargs["sim_meta_id"] == MOCK_ENTRY_DATA_COOKIE[CONF_SIM_META_ID]
+        assert kwargs["order_detail_id"] == MOCK_SIM_SUBENTRY_DATA[CONF_ORDER_DETAIL_ID]
+        assert kwargs["sim_meta_id"] == MOCK_SIM_SUBENTRY_DATA[CONF_SIM_META_ID]
 
     @pytest.mark.asyncio
     async def test_bucket_breakdown_is_exposed(self) -> None:
@@ -234,8 +228,8 @@ class TestCoordinatorUpdate:
         result = await coordinator._async_update_data()
 
         client.async_login.assert_called_once()
-        assert coordinator.cookie_header == "new-cookie"
-        assert coordinator.xsrf_header == "new-xsrf"
+        assert coordinator.session.cookie_header == "new-cookie"
+        assert coordinator.session.xsrf_token == "new-xsrf"
         assert result[ATTR_USAGE] == 3.5
 
     @pytest.mark.asyncio
@@ -248,8 +242,6 @@ class TestCoordinatorUpdate:
             cookie=None,
             xsrf=None,
         )
-        coordinator.email = ""
-        coordinator.password = ""
 
         with pytest.raises(ConfigEntryAuthFailed):
             await coordinator._async_update_data()
@@ -287,12 +279,14 @@ class TestCoordinatorUpdate:
             cookie="stale-cookie",
             xsrf="stale-xsrf",
         )
-        coordinator._auth_time = time.monotonic() - (AUTH_REFRESH_THRESHOLD + 100)
+        coordinator.session.authenticated_at = time.monotonic() - (
+            AUTH_REFRESH_THRESHOLD + 100
+        )
 
         result = await coordinator._async_update_data()
 
         client.async_login.assert_called_once()
-        assert coordinator.cookie_header == "fresh-cookie"
+        assert coordinator.session.cookie_header == "fresh-cookie"
         # The fetch must use the freshly refreshed cookie, not the stale one.
         assert client.async_get_usage.call_args.kwargs["cookie_header"] == (
             "fresh-cookie"
@@ -316,12 +310,12 @@ class TestCoordinatorUpdate:
             xsrf="old-xsrf",
         )
         # Fresh session → only the auth-error path triggers a re-login.
-        coordinator._auth_time = time.monotonic()
+        coordinator.session.authenticated_at = time.monotonic()
 
         result = await coordinator._async_update_data()
 
         client.async_login.assert_called_once()
-        assert coordinator.cookie_header == "new-cookie"
+        assert coordinator.session.cookie_header == "new-cookie"
         assert result[ATTR_USAGE] == 3.5
         assert client.async_get_usage.call_count == 2
 
@@ -342,7 +336,7 @@ class TestCoordinatorUpdate:
         hass.config_entries.async_update_entry = entry.async_update_entry
 
         coordinator = _make_coordinator_for_entry(client, entry)
-        coordinator._auth_time = time.monotonic()
+        coordinator.session.authenticated_at = time.monotonic()
         coordinator.hass = hass
 
         await coordinator._async_update_data()
@@ -359,8 +353,6 @@ class TestCoordinatorUpdate:
         client.async_get_usage.side_effect = MozillionAuthError("session expired")
 
         coordinator = _make_coordinator(client, cookie="old-cookie", xsrf="old-xsrf")
-        coordinator.email = ""
-        coordinator.password = ""
 
         with pytest.raises(ConfigEntryAuthFailed, match="no credentials"):
             await coordinator._async_update_data()
@@ -425,28 +417,33 @@ class TestCoordinatorUpdate:
 
 
 class TestNeedsAuth:
-    """Tests for the session refresh heuristics."""
+    """Tests for the shared session's refresh heuristics.
+
+    One session covers every SIM on the account, so these decide for the account
+    rather than for a single coordinator.
+    """
 
     def test_cookie_only_entry_never_relogins(self) -> None:
-        client = _client()
-        coordinator = _make_coordinator(client)
-        coordinator.email = ""
-        coordinator.password = ""
+        coordinator = _make_coordinator(_client(), entry_data=MOCK_ENTRY_DATA_COOKIE)
 
-        assert coordinator._needs_auth() is False
+        assert (
+            coordinator.session.needs_authentication(coordinator.config_entry) is False
+        )
 
     def test_known_fresh_session_is_reused(self) -> None:
-        client = _client()
-        coordinator = _make_coordinator(client, entry_data=MOCK_ENTRY_DATA_LOGIN)
-        coordinator._auth_time = time.monotonic()
+        coordinator = _make_coordinator(_client(), entry_data=MOCK_ENTRY_DATA_LOGIN)
+        coordinator.session.authenticated_at = time.monotonic()
 
-        assert coordinator._needs_auth() is False
+        assert (
+            coordinator.session.needs_authentication(coordinator.config_entry) is False
+        )
 
     def test_unknown_auth_time_with_creds_forces_login(self) -> None:
-        client = _client()
-        coordinator = _make_coordinator(client, entry_data=MOCK_ENTRY_DATA_LOGIN)
+        coordinator = _make_coordinator(_client(), entry_data=MOCK_ENTRY_DATA_LOGIN)
 
-        assert coordinator._needs_auth() is True
+        assert (
+            coordinator.session.needs_authentication(coordinator.config_entry) is True
+        )
 
 
 class TestAccountDetail:
@@ -517,8 +514,6 @@ class TestAccountDetail:
             cookie="old",
             xsrf="old",
         )
-        coordinator.email = ""
-        coordinator.password = ""
 
         with pytest.raises(ConfigEntryAuthFailed):
             await coordinator._async_update_data()
@@ -539,7 +534,7 @@ class TestAccountDetail:
             cookie="old-cookie",
             xsrf="old-xsrf",
         )
-        coordinator._auth_time = time.monotonic()
+        coordinator.session.authenticated_at = time.monotonic()
 
         result = await coordinator._async_update_data()
 

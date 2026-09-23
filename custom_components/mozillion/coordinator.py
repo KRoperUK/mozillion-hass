@@ -9,7 +9,7 @@ from datetime import timedelta
 from typing import Any, TypeVar
 
 from aiohttp import ClientError
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import issue_registry as ir
@@ -42,23 +42,18 @@ from .const import (
     ATTR_WALLET,
     ATTR_WALLET_BALANCE,
     ATTR_WALLET_SPEND,
-    AUTH_REFRESH_THRESHOLD,
-    CONF_EMAIL,
     CONF_ICCID,
     CONF_ORDER_DETAIL_ID,
-    CONF_ORIGIN,
-    CONF_PASSWORD,
     CONF_SESSION_COOKIE,
     CONF_SIM_META_ID,
     CONF_SIM_NUMBER,
-    CONF_TOTP_SECRET,
     CONF_XSRF_TOKEN,
     DASHBOARD_REFRESH_INTERVAL,
-    DEFAULT_ORIGIN,
     DOMAIN,
     ISSUE_DASHBOARD_UNREADABLE,
     REPAIR_FAILURE_THRESHOLD,
 )
+from .session import MozillionSession, has_credentials
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -86,23 +81,20 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
         hass: HomeAssistant,
         client: MozillionClient,
         entry: ConfigEntry,
-        cookie_header: str | None,
-        xsrf_header: str | None,
+        subentry: ConfigSubentry,
+        session: MozillionSession,
         update_interval: timedelta,
     ) -> None:
         self.client = client
-        self.cookie_header = cookie_header
-        self.xsrf_header = xsrf_header
-        self.email = entry.data.get(CONF_EMAIL)
-        self.password = entry.data.get(CONF_PASSWORD)
-        self.totp_secret = entry.data.get(CONF_TOTP_SECRET) or None
-        self.origin = entry.data.get(CONF_ORIGIN, DEFAULT_ORIGIN)
+        self.subentry = subentry
+        # One session per account, shared with every other SIM's coordinator.
+        self.session = session
         self._reset_poll_state()
 
         super().__init__(
             hass,
             _LOGGER,
-            name="Mozillion Data",
+            name=f"Mozillion Data {subentry.title}",
             update_interval=update_interval,
             # async_config_entry_first_refresh refuses to run for a coordinator
             # that does not know which config entry owns it.
@@ -117,10 +109,6 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
         attribute by hand and silently breaking when one is added.
         """
 
-        # Monotonic time of the last successful authentication, used to decide
-        # when to proactively refresh an expiring session. Unknown (None) until
-        # we authenticate, which forces a refresh when credentials are present.
-        self._auth_time: float | None = None
         # Consecutive failed reads of the dashboard, used to decide when the
         # markup breakage is worth telling the user about, and whether we have an
         # outstanding repair to withdraw.
@@ -131,38 +119,15 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._sim_detail: MozillionSim | None = None
         self._sim_detail_at: float | None = None
 
-    def _needs_auth(self) -> bool:
-        """Return True when the session should be (re)authenticated now."""
-
-        # No session at all: only possible to obtain one if we have credentials.
-        if not self.cookie_header:
-            return bool(self.email and self.password)
-
-        # Cookie-only configurations cannot refresh, so never attempt a login.
-        if not (self.email and self.password):
-            return False
-
-        # Proactively re-authenticate once the session is older than the
-        # threshold, so we never poll with an already-expired token.
-        if self._auth_time is None:
-            return True
-        return (time.monotonic() - self._auth_time) > AUTH_REFRESH_THRESHOLD
-
     async def _async_refresh_auth(self) -> None:
-        """Log in (if credentials are available) and store the new session."""
+        """Log in through the shared session, persisting it only once.
 
-        if not (self.email and self.password):
-            return
+        The session serialises logins, so whichever SIM gets there first does the
+        work and the rest reuse the cookies; only that first one writes the entry.
+        """
 
-        _LOGGER.debug("Refreshing Mozillion session")
-        self.cookie_header, self.xsrf_header = await self.client.async_login(
-            email=self.email,
-            password=self.password,
-            totp_secret=self.totp_secret,
-            origin=self.origin,
-        )
-        self._auth_time = time.monotonic()
-        await self._async_persist_auth()
+        if await self.session.async_authenticate(self.client, self.config_entry):
+            await self._async_persist_auth()
 
     async def _async_persist_auth(self) -> None:
         """Persist the refreshed session back to the config entry.
@@ -174,36 +139,36 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
         if self.config_entry is None:
             return
         new_data = dict(self.config_entry.data)
-        new_data[CONF_SESSION_COOKIE] = self.cookie_header or ""
-        new_data[CONF_XSRF_TOKEN] = self.xsrf_header or ""
+        new_data[CONF_SESSION_COOKIE] = self.session.cookie_header or ""
+        new_data[CONF_XSRF_TOKEN] = self.session.xsrf_token or ""
         self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
 
     async def _async_fetch_usage(self) -> dict[str, Any]:
-        """Call the usage endpoints with the current session."""
+        """Call the usage endpoints for this SIM with the shared session."""
 
         return await self.client.async_get_usage(
-            order_detail_id=self.config_entry.data[CONF_ORDER_DETAIL_ID],
-            sim_meta_id=self.config_entry.data[CONF_SIM_META_ID],
-            cookie_header=self.cookie_header or "",
-            xsrf_token=self.xsrf_header,
+            order_detail_id=self.subentry.data[CONF_ORDER_DETAIL_ID],
+            sim_meta_id=self.subentry.data[CONF_SIM_META_ID],
+            cookie_header=self.session.cookie_header or "",
+            xsrf_token=self.session.xsrf_token,
         )
 
     async def _async_fetch_sim(self) -> MozillionSim:
         """Read the plan/reset/status detail for this SIM from the dashboard."""
 
         return await self.client.async_fetch_sim(
-            sim_meta_id=self.config_entry.data[CONF_SIM_META_ID],
-            cookie_header=self.cookie_header or "",
-            xsrf_token=self.xsrf_header,
+            sim_meta_id=self.subentry.data[CONF_SIM_META_ID],
+            cookie_header=self.session.cookie_header or "",
+            xsrf_token=self.session.xsrf_token,
         )
 
     async def _async_fetch_wallet(self) -> dict[str, Any]:
         """Read the out-of-bundle wallet position for this order."""
 
         return await self.client.async_fetch_overspend(
-            order_detail_id=self.config_entry.data[CONF_ORDER_DETAIL_ID],
-            cookie_header=self.cookie_header or "",
-            xsrf_token=self.xsrf_header,
+            order_detail_id=self.subentry.data[CONF_ORDER_DETAIL_ID],
+            cookie_header=self.session.cookie_header or "",
+            xsrf_token=self.session.xsrf_token,
         )
 
     async def _async_read_optional(
@@ -314,7 +279,7 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             translation_placeholders={
                 "attempts": str(self._dashboard_failures),
                 "error": error[:200],
-                "entry": self.config_entry.title,
+                "entry": self.subentry.title,
             },
         )
 
@@ -335,10 +300,10 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         _LOGGER.debug("Update cycle started")
         try:
-            if self._needs_auth():
+            if self.session.needs_authentication(self.config_entry):
                 await self._async_refresh_auth()
 
-            if not self.cookie_header:
+            if not self.session.cookie_header:
                 raise ConfigEntryAuthFailed(
                     "No session cookie and no credentials are configured to "
                     "obtain one. Please reconfigure the integration."
@@ -352,12 +317,13 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             raise UpdateFailed(err) from err
 
         data = _build_coordinator_data(raw, sim=sim, wallet=wallet)
-        data[ATTR_SIM_NUMBER] = self.config_entry.data.get(CONF_SIM_NUMBER, "")
-        data[ATTR_ICCID] = self.config_entry.data.get(CONF_ICCID, "")
+        data[ATTR_SIM_NUMBER] = self.subentry.data.get(CONF_SIM_NUMBER, "")
+        data[ATTR_ICCID] = self.subentry.data.get(CONF_ICCID, "")
 
         _LOGGER.debug(
-            "Update success: usage=%s, total=%s, remaining=%s, "
+            "Update success for %s: usage=%s, total=%s, remaining=%s, "
             "percentage=%s, unlimited=%s, status=%s, reset=%s, wallet=%s",
+            self.subentry.title,
             data[ATTR_USAGE],
             data[ATTR_TOTAL],
             data[ATTR_REMAINING],
@@ -378,7 +344,7 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
         hand the problem to the user via a reauth flow.
         """
 
-        if not (self.email and self.password):
+        if not has_credentials(self.config_entry):
             raise ConfigEntryAuthFailed(
                 "Session expired and no credentials are configured to "
                 "re-authenticate. Please update the integration's credentials or "
@@ -387,8 +353,11 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         _LOGGER.warning("Mozillion session expired; re-authenticating and retrying")
         try:
+            # Force the shared session to log in again: the cookie it holds was
+            # just rejected, so waiting for the age threshold would keep failing.
+            self.session.authenticated_at = None
             await self._async_refresh_auth()
-            if not self.cookie_header:
+            if not self.session.cookie_header:
                 raise UpdateFailed(
                     "Re-authentication failed to obtain a session"
                 ) from None

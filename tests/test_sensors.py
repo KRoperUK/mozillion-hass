@@ -41,6 +41,8 @@ from tests.conftest import (
     MOCK_COORDINATOR_DATA_NO_WALLET,
     MOCK_COORDINATOR_DATA_UNLIMITED,
     _make_config_entry,
+    _sim_subentry_data,
+    sim_subentry,
 )
 
 COMPONENT_DIR = (
@@ -51,14 +53,16 @@ COMPONENT_DIR = (
 def _sensor(
     data: dict[str, Any] | None = None,
     description: MozillionSensorEntityDescription | None = None,
-    entry_data: dict[str, Any] | None = None,
+    subentries: list[dict[str, Any]] | None = None,
 ) -> MozillionSensor:
-    """Build a sensor backed by a mock coordinator."""
+    """Build a sensor for the entry's first SIM, backed by a mock coordinator."""
 
     coordinator = MagicMock()
     coordinator.data = data if data is not None else MOCK_COORDINATOR_DATA
-    entry = _make_config_entry(data=entry_data)
-    return MozillionSensor(coordinator, entry, description or DATA_SENSORS[0])
+    entry = _make_config_entry(subentries=subentries)
+    return MozillionSensor(
+        coordinator, entry, sim_subentry(entry), description or DATA_SENSORS[0]
+    )
 
 
 def _sensor_for(key: str, data: dict[str, Any] | None = None) -> MozillionSensor:
@@ -68,14 +72,21 @@ def _sensor_for(key: str, data: dict[str, Any] | None = None) -> MozillionSensor
     return _sensor(data=data, description=description)
 
 
+def _binary_sensor(cls, data: dict[str, Any] | None = None):
+    """Build a binary sensor for the entry's first SIM."""
+
+    coordinator = MagicMock()
+    coordinator.data = data if data is not None else MOCK_COORDINATOR_DATA
+    entry = _make_config_entry()
+    return cls(coordinator, entry, sim_subentry(entry))
+
+
 def _unlimited_sensor(
     data: dict[str, Any] | None = None,
 ) -> MozillionUnlimitedSensor:
     """Build an unlimited binary sensor backed by a mock coordinator."""
 
-    coordinator = MagicMock()
-    coordinator.data = data if data is not None else MOCK_COORDINATOR_DATA
-    return MozillionUnlimitedSensor(coordinator, _make_config_entry())
+    return _binary_sensor(MozillionUnlimitedSensor, data)
 
 
 def _overspend_sensor(
@@ -83,9 +94,7 @@ def _overspend_sensor(
 ) -> MozillionOverspendSensor:
     """Build an overspend binary sensor backed by a mock coordinator."""
 
-    coordinator = MagicMock()
-    coordinator.data = data if data is not None else MOCK_COORDINATOR_DATA
-    return MozillionOverspendSensor(coordinator, _make_config_entry())
+    return _binary_sensor(MozillionOverspendSensor, data)
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +196,12 @@ class TestMozillionSensorEntity:
     """Tests for the MozillionSensor entity class."""
 
     def test_unique_id(self) -> None:
-        assert _sensor()._attr_unique_id == f"test_entry_id_{ATTR_USAGE}"
+        """Scoped by SIM, so a second SIM on the account cannot collide."""
+        sensor = _sensor()
+        subentry = sensor._subentry
+        assert sensor._attr_unique_id == (
+            f"test_entry_id_{subentry.subentry_id}_{ATTR_USAGE}"
+        )
 
     def test_has_entity_name(self) -> None:
         assert _sensor()._attr_has_entity_name is True
@@ -201,10 +215,10 @@ class TestMozillionSensorEntity:
         """Identity must not depend on the phone number, which can change."""
         assert (DOMAIN, "7654321") in _sensor().device_info["identifiers"]
 
-    def test_device_info_without_sim_meta_id_falls_back_to_entry_id(self) -> None:
-        sensor = _sensor(entry_data={"sim_meta_id": "", "sim_number": ""})
+    def test_device_info_without_sim_meta_id_falls_back_to_subentry_id(self) -> None:
+        sensor = _sensor(subentries=[_sim_subentry_data(sim_meta_id="", sim_number="")])
         info = sensor.device_info
-        assert (DOMAIN, "test_entry_id") in info["identifiers"]
+        assert (DOMAIN, sensor._subentry.subentry_id) in info["identifiers"]
         assert info["name"] == "Mozillion"
 
     def test_device_info_names_the_sim_number(self) -> None:
@@ -299,7 +313,10 @@ class TestUnlimitedBinarySensor:
     """Tests for the MozillionUnlimitedSensor entity."""
 
     def test_unique_id(self) -> None:
-        assert _unlimited_sensor()._attr_unique_id == "test_entry_id_unlimited"
+        sensor = _unlimited_sensor()
+        assert sensor._attr_unique_id == (
+            f"test_entry_id_{sensor._subentry.subentry_id}_unlimited"
+        )
 
     def test_translation_key(self) -> None:
         assert _unlimited_sensor()._attr_translation_key == "unlimited"
@@ -328,8 +345,10 @@ class TestOverspendBinarySensor:
     """Tests for the MozillionOverspendSensor entity."""
 
     def test_unique_id(self) -> None:
-        assert _overspend_sensor()._attr_unique_id == (
-            f"test_entry_id_{ATTR_OVERSPEND_LIMIT_REACHED}"
+        sensor = _overspend_sensor()
+        assert sensor._attr_unique_id == (
+            f"test_entry_id_{sensor._subentry.subentry_id}_"
+            f"{ATTR_OVERSPEND_LIMIT_REACHED}"
         )
 
     def test_translation_key(self) -> None:
