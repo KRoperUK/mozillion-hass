@@ -1,7 +1,8 @@
 COMPOSE_FILE := docker-compose.dev.yml
 PYTHON      := .venv/bin/python
 
-.PHONY: up down logs ps restart test test-live lint format check ci venv clean
+.PHONY: up down logs ps restart test test-live test-all lint typecheck format \
+        check pre-commit ci ci-local ci-local-lint ci-local-full venv clean
 
 # ── Docker ──────────────────────────────────────────────
 up:
@@ -33,10 +34,18 @@ test-all: test test-live
 lint:
 	ruff check custom_components/ scripts/ tests/
 
-format:
-	ruff format custom_components/ tests/
+# CI runs this in the test job, after `uv sync --dev` installs Home Assistant.
+# mypy follows HA's types rather than skipping them, so it needs them present.
+typecheck:
+	mypy custom_components/mozillion
 
-check: lint
+# Same paths as `check` requires: formatting only `custom_components/` and
+# `tests/` left `scripts/` unformatted, so `make format` could not fix what
+# `make check` then rejected.
+format:
+	ruff format custom_components/ scripts/ tests/
+
+check: lint typecheck
 	ruff format --check custom_components/ scripts/ tests/
 
 # ── Pre-commit ──────────────────────────────────────────
