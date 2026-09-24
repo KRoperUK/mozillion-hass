@@ -13,6 +13,7 @@ from custom_components.mozillion.api import (
     MozillionClient,
     _build_cookie_header,
     _extract_csrf,
+    mask_identifier,
     parse_reset_date,
     parse_sims,
 )
@@ -844,3 +845,19 @@ class TestParseResetDate:
     def test_leap_day_rolls_forward_like_any_other_day(self) -> None:
         """No year rollover any more, so 29 February is not a special case."""
         assert parse_reset_date("29 Feb", today=date(2024, 3, 1)) == date(2024, 3, 29)
+
+
+class TestMaskIdentifier:
+    """Masking is what keeps identifiers out of logs and bug reports."""
+
+    def test_hides_the_middle(self) -> None:
+        assert mask_identifier("07700900000") == "077*****000"
+
+    def test_short_values_are_hidden_entirely(self) -> None:
+        # A value no longer than the visible prefix and suffix combined would be
+        # mostly legible if only its middle were replaced.
+        assert mask_identifier("abc") == "***"
+
+    def test_empty_is_empty(self) -> None:
+        assert mask_identifier("") == ""
+        assert mask_identifier(None) == ""

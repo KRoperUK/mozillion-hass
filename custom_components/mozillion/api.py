@@ -123,7 +123,9 @@ class MozillionClient:
         Returns ``(cookie_header, xsrf_header)``.
         """
 
-        _LOGGER.debug("Starting login for email=%s, totp=%s", email, bool(totp_secret))
+        # Deliberately no email: debug logs get pasted into public bug reports,
+        # and the account is already known from the entry.
+        _LOGGER.debug("Starting login (totp=%s)", bool(totp_secret))
 
         token = await self._async_fetch_login_token(origin)
         totp = _build_totp(totp_secret) if totp_secret else None
@@ -613,6 +615,22 @@ def parse_reset_date(
 
     _LOGGER.debug("Could not find a future reset date for %r", label)
     return None
+
+
+def mask_identifier(value: str | None, keep: int = 3) -> str:
+    """Mask the middle of an identifier.
+
+    Debug logs and diagnostics downloads are routinely attached to public bug
+    reports, so a phone number or ICCID must not travel in one in full. This is
+    the same treatment ``scripts/live_check.py`` gives its output.
+    """
+
+    text = str(value or "")
+    if not text:
+        return ""
+    if len(text) <= keep * 2:
+        return "*" * len(text)
+    return f"{text[:keep]}{'*' * (len(text) - keep * 2)}{text[-keep:]}"
 
 
 def _to_float(value: str | None) -> float | None:

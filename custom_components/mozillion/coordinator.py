@@ -15,7 +15,13 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import MozillionAuthError, MozillionClient, MozillionSim, parse_reset_date
+from .api import (
+    MozillionAuthError,
+    MozillionClient,
+    MozillionSim,
+    mask_identifier,
+    parse_reset_date,
+)
 from .const import (
     ATTR_BILLING_AMOUNT,
     ATTR_BILLING_DAYS,
@@ -61,6 +67,7 @@ from .const import (
     DOMAIN,
     ISSUE_DASHBOARD_UNREADABLE,
     REPAIR_FAILURE_THRESHOLD,
+    SUBENTRY_TYPE_SIM,
 )
 from .session import MozillionSession, has_credentials
 
@@ -80,6 +87,13 @@ def _to_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _coordinator_label(subentry: ConfigSubentry) -> str:
+    """Name a coordinator without putting the phone number in the logs."""
+
+    sim_number = str(subentry.data.get(CONF_SIM_NUMBER) or "")
+    return mask_identifier(sim_number) if sim_number else SUBENTRY_TYPE_SIM
 
 
 class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
@@ -103,7 +117,10 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
         super().__init__(
             hass,
             _LOGGER,
-            name=f"Mozillion Data {subentry.title}",
+            # The subentry title is the dashboard's display name, which carries
+            # the phone number, and this name lands in Home Assistant's own log
+            # lines ("Finished fetching ... data"). Only a masked number is used.
+            name=f"Mozillion Data {_coordinator_label(subentry)}",
             update_interval=update_interval,
             # async_config_entry_first_refresh refuses to run for a coordinator
             # that does not know which config entry owns it.
@@ -300,7 +317,7 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             translation_placeholders={
                 "attempts": str(self._dashboard_failures),
                 "error": error[:200],
-                "entry": self.subentry.title,
+                "entry": _coordinator_label(self.subentry),
             },
         )
 
@@ -344,7 +361,7 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
         _LOGGER.debug(
             "Update success for %s: usage=%s, total=%s, remaining=%s, "
             "percentage=%s, unlimited=%s, status=%s, reset=%s, wallet=%s",
-            self.subentry.title,
+            _coordinator_label(self.subentry),
             data[ATTR_USAGE],
             data[ATTR_TOTAL],
             data[ATTR_REMAINING],
