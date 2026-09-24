@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from datetime import date
+from types import MappingProxyType
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -39,11 +40,13 @@ from custom_components.mozillion.const import (
     CONF_ORDER_DETAIL_ID,
     CONF_SESSION_COOKIE,
     CONF_SIM_META_ID,
+    CONF_SIM_NUMBER,
     CONF_XSRF_TOKEN,
     DASHBOARD_REFRESH_INTERVAL,
     REPAIR_FAILURE_THRESHOLD,
+    SUBENTRY_TYPE_SIM,
 )
-from custom_components.mozillion.coordinator import wallet_is_active
+from custom_components.mozillion.coordinator import _coordinator_label, wallet_is_active
 from custom_components.mozillion.session import MozillionSession
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -632,3 +635,28 @@ class TestDashboardCache:
             await coordinator._async_update_data()
 
         assert coordinator._dashboard_failures == 0
+
+
+class TestCoordinatorLabel:
+    """The coordinator's name reaches Home Assistant's own log lines."""
+
+    @staticmethod
+    def _subentry(**data: str) -> Any:
+        from homeassistant.config_entries import ConfigSubentry
+
+        return ConfigSubentry(
+            data=MappingProxyType(data),
+            subentry_type=SUBENTRY_TYPE_SIM,
+            title=data.get(CONF_SIM_NUMBER, "SIM"),
+            unique_id="7654321",
+        )
+
+    def test_the_phone_number_is_masked(self) -> None:
+        label = _coordinator_label(self._subentry(**{CONF_SIM_NUMBER: "07700900000"}))
+
+        assert "07700900000" not in label
+        assert label.startswith("077")
+        assert label.endswith("000")
+
+    def test_a_sim_with_no_number_still_gets_a_label(self) -> None:
+        assert _coordinator_label(self._subentry()) == SUBENTRY_TYPE_SIM

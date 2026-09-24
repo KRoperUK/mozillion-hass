@@ -14,8 +14,10 @@ from custom_components.mozillion import MozillionRuntimeData
 from custom_components.mozillion.const import (
     CONF_EMAIL,
     CONF_ICCID,
+    CONF_ORDER_DETAIL_ID,
     CONF_PASSWORD,
     CONF_SESSION_COOKIE,
+    CONF_SIM_META_ID,
     CONF_SIM_NUMBER,
     CONF_TOTP_SECRET,
     CONF_XSRF_TOKEN,
@@ -91,6 +93,31 @@ async def test_secrets_are_redacted(hass: HomeAssistant) -> None:
     dumped = str(diagnostics)
     for key, value in SECRETS.items():
         assert value not in dumped, f"{key} leaked into diagnostics"
+
+
+async def test_identifiers_are_redacted(hass: HomeAssistant) -> None:
+    """The phone number and ICCID must not survive either.
+
+    They are not credentials, so they are not in SECRETS, but a diagnostics
+    download is exactly what gets attached to a public bug report -- which is how
+    this repository leaked identifiers once already. The subentry title is the
+    dashboard's display name, so it contains the phone number, and the account
+    title is the login email.
+    """
+
+    entry, subentry_id = _entry_with_coordinator(hass)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    dumped = str(diagnostics)
+    subentry = entry.subentries[subentry_id]
+    assert subentry.data[CONF_SIM_NUMBER] not in dumped, "phone number leaked"
+    assert subentry.data[CONF_ICCID] not in dumped, "ICCID leaked"
+    # Mozillion's own ids identify the account just as the ICCID does.
+    assert subentry.data[CONF_SIM_META_ID] not in dumped, "sim_meta_id leaked"
+    assert subentry.data[CONF_ORDER_DETAIL_ID] not in dumped, "order_detail_id leaked"
+    assert diagnostics["entry"]["title"] == "**REDACTED**"
+    assert diagnostics["subentries"][subentry_id]["title"] == "**REDACTED**"
 
     # Redaction reaches the subentry and the coordinator payload, not just entry.data.
     subentry_data = diagnostics["subentries"][subentry_id]["data"]
