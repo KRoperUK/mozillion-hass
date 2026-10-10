@@ -41,8 +41,8 @@ dev = [
     "requests-mock==1.12.1",
     "respx==0.23.1",
     "python-dotenv",
-    "ruff==0.16.8",
-    "mypy==2.3.1",
+    "ruff==0.16.10",
+    "mypy==2.4.0",
 ]
 
 [tool.pytest.ini_options]
