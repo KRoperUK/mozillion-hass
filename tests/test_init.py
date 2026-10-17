@@ -271,3 +271,23 @@ async def test_the_port_status_and_plan_details_are_exposed(
     assert status.attributes[ATTR_PLAN_PARENTAL_CONTROL] is False
     assert status.attributes[ATTR_BILLING_AMOUNT] == 999.0
     assert status.attributes[ATTR_HAS_BILL] is False
+
+
+async def test_setup_gives_the_client_its_own_session(hass: HomeAssistant) -> None:
+    """The Mozillion cookies must not ride on Home Assistant's shared session.
+
+    ``async_get_clientsession`` hands every integration the same aiohttp session,
+    so the login cookies Mozillion sets could be read by -- and sent on behalf
+    of -- unrelated integrations. The client gets a dedicated session instead.
+    """
+
+    entry = _entry(hass)
+
+    with (
+        patch(CLIENT, return_value=_client()),
+        patch("custom_components.mozillion.async_create_clientsession") as session,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id) is True
+        await hass.async_block_till_done()
+
+    session.assert_called_once_with(hass)

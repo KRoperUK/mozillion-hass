@@ -22,7 +22,7 @@ from homeassistant.config_entries import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import selector
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
 from .api import MozillionAuthError, MozillionClient, MozillionSim
 from .const import (
@@ -153,7 +153,7 @@ async def _async_client_with_session(
     credentials, the same way the coordinator recovers.
     """
 
-    client = MozillionClient(async_get_clientsession(hass))
+    client = MozillionClient(async_create_clientsession(hass))
     cookie_header = entry.data.get(CONF_SESSION_COOKIE) or ""
     xsrf_token = entry.data.get(CONF_XSRF_TOKEN)
 
@@ -233,7 +233,7 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            client = MozillionClient(async_get_clientsession(self.hass))
+            client = MozillionClient(async_create_clientsession(self.hass))
             try:
                 data = await _async_authenticate(client, dict(user_input))
             except ValueError:
@@ -343,7 +343,7 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
 
         try:
             await _async_validate(
-                MozillionClient(async_get_clientsession(self.hass)),
+                MozillionClient(async_create_clientsession(self.hass)),
                 self._cookie_header or "",
                 self._xsrf_token,
                 sim,
@@ -404,7 +404,7 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
         existing = self._get_reauth_entry()
 
         if user_input is not None:
-            client = MozillionClient(async_get_clientsession(self.hass))
+            client = MozillionClient(async_create_clientsession(self.hass))
             try:
                 updated = await _async_authenticate(client, dict(user_input))
             except ValueError:
@@ -457,7 +457,7 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            client = MozillionClient(async_get_clientsession(self.hass))
+            client = MozillionClient(async_create_clientsession(self.hass))
             try:
                 data = await _async_authenticate(client, dict(user_input))
             except ValueError:
@@ -509,7 +509,7 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
         subentry = sims[0]
         try:
             await _async_validate(
-                MozillionClient(async_get_clientsession(self.hass)),
+                MozillionClient(async_create_clientsession(self.hass)),
                 data.get(CONF_SESSION_COOKIE, ""),
                 data.get(CONF_XSRF_TOKEN),
                 MozillionSim(

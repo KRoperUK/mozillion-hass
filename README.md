@@ -1,7 +1,7 @@
 # Mozillion Home Assistant Custom Component
 
 <p align="center">
-  <img src="https://brands.home-assistant.io/mozillion/icon.png" alt="Mozillion Logo" width="200"/>
+  <img src="custom_components/mozillion/brand/logo@2x.png" alt="Mozillion Logo" width="200"/>
 </p>
 
 Tracks your [Mozillion](https://www.mozillion.com/) mobile data usage in Home
