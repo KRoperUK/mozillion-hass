@@ -239,6 +239,32 @@ async def test_unreadable_sim_list_falls_back_to_manual_ids(
     assert result["step_id"] == "manual_ids"
 
 
+async def test_flow_builds_its_client_on_a_dedicated_session(
+    hass: HomeAssistant,
+) -> None:
+    """Login cookies belong to this integration, not HA's shared session.
+
+    The flow verifies credentials by logging in, so the session it logs in on
+    must be its own -- otherwise the cookies it reads back would come from the
+    shared jar every integration can see.
+    """
+
+    client = _mock_client()
+
+    with (
+        patch(CLIENT, return_value=client),
+        patch(
+            "custom_components.mozillion.config_flow.async_create_clientsession"
+        ) as session,
+    ):
+        result = await _start_user_flow(hass)
+        await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+
+    session.assert_called_once_with(hass)
+
+
 # ---------------------------------------------------------------------------
 # async_step_manual_ids
 # ---------------------------------------------------------------------------

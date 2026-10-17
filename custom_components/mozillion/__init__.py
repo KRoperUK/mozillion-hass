@@ -24,7 +24,7 @@ from homeassistant.config_entries import (
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
 from .api import MozillionAuthError, MozillionClient, MozillionSim
 from .const import (
@@ -88,7 +88,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: MozillionConfigEntry) ->
     """Set up the account and one coordinator per SIM."""
 
     session = MozillionSession.from_entry(entry)
-    client = MozillionClient(async_get_clientsession(hass))
+    client = MozillionClient(async_create_clientsession(hass))
     update_interval = timedelta(
         seconds=entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     )
@@ -285,7 +285,7 @@ async def _async_migrate_to_v2(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Re-discover the SIM this entry was created for and rewrite its data."""
 
     data = dict(entry.data)
-    client = MozillionClient(async_get_clientsession(hass))
+    client = MozillionClient(async_create_clientsession(hass))
 
     cookie_header = data.get(CONF_SESSION_COOKIE) or ""
     xsrf_token = data.get(CONF_XSRF_TOKEN)

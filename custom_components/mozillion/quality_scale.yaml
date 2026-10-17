@@ -16,7 +16,9 @@ rules:
       server-side on its own schedule.
   brands:
     status: done
-    comment: Brand images for `mozillion` are published in home-assistant/brands.
+    comment: >-
+      Brand images ship in ``custom_components/mozillion/brand/`` (icon and logo,
+      with dark variants and @2x), so Home Assistant serves them locally.
   common-modules:
     status: done
     comment: Shared device/entity wiring lives in ``entity.py``.
@@ -190,7 +192,11 @@ rules:
     comment: pyotp performs local computation with no I/O; the only network client is aiohttp.
   inject-websession:
     status: done
-    comment: The Home Assistant shared aiohttp session is injected via async_get_clientsession.
+    comment: >-
+      The client gets its own aiohttp session from async_create_clientsession, so
+      the Mozillion login cookies stay out of the shared session Home Assistant
+      hands to every integration; the cookie header is additionally filtered to
+      the Mozillion host with cookie_jar.filter_cookies.
   strict-typing:
     status: done
     comment: >-
