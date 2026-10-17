@@ -35,7 +35,7 @@ rules:
       reauth, reconfigure, options).
   dependency-transparency:
     status: done
-    comment: ``pyotp`` is declared and pinned in ``manifest.json`` requirements.
+    comment: ``pyotp`` is declared with a minimum version in ``manifest.json`` requirements.
   docs-actions:
     status: exempt
     comment: The integration provides no actions.
