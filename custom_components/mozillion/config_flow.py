@@ -46,6 +46,31 @@ from .session import has_credentials
 
 _LOGGER = logging.getLogger(__name__)
 
+# Mozillion answers a fixed number of requests per window, so a shorter interval
+# spends the budget and every poll comes back through the rate-limit path in
+# ``api._raise_for_rate_limit``. The setup and options dialogs enforce this same
+# floor; the options dialog used to accept anything, including zero.
+MIN_SCAN_INTERVAL = 60
+
+
+def _dedicated_client(hass: HomeAssistant) -> MozillionClient:
+    """Build a client on a session the caller owns.
+
+    The session deliberately does not come from ``async_get_clientsession``:
+    Mozillion's login cookies must stay out of the jar every integration shares
+    (``quality_scale.yaml``, ``inject-websession``).
+
+    It also cannot hang off a config entry. Home Assistant only ties a session to
+    the entry's unload when it is created *during* entry setup --
+    ``_async_register_clientsession_shutdown`` returns early when
+    ``config_entries.current_entry`` is unset -- so a session created inside a
+    flow is registered for ``EVENT_HOMEASSISTANT_CLOSE`` only. A flow therefore
+    keeps one for its whole life instead of one per step; see
+    ``MozillionConfigFlow._async_client``.
+    """
+
+    return MozillionClient(async_create_clientsession(hass))
+
 
 def _credentials_schema(defaults: Mapping[str, Any] | None = None) -> dict[Any, Any]:
     """Build the shared credential fields used by setup and reauth."""
@@ -144,16 +169,17 @@ def _sim_choices(sims: list[MozillionSim], taken: set[str]) -> dict[str, Mozilli
     return choices
 
 
-async def _async_client_with_session(
-    hass: HomeAssistant, entry: ConfigEntry
-) -> tuple[MozillionClient, str, str | None]:
-    """Return a client and working cookies for the account.
+async def _async_session_for_entry(
+    client: MozillionClient, entry: ConfigEntry
+) -> tuple[str, str | None]:
+    """Return working cookies for the account, using the caller's client.
 
     The stored session is tried first; a stale one is renewed from the entry's
-    credentials, the same way the coordinator recovers.
+    credentials, the same way the coordinator recovers. The client is passed in
+    rather than built here: every step of a flow shares the one session its
+    invocation created (``_dedicated_client``).
     """
 
-    client = MozillionClient(async_create_clientsession(hass))
     cookie_header = entry.data.get(CONF_SESSION_COOKIE) or ""
     xsrf_token = entry.data.get(CONF_XSRF_TOKEN)
 
@@ -166,8 +192,7 @@ async def _async_client_with_session(
         )
 
     if not cookie_header and has_credentials(entry):
-        cookie_header, xsrf_token = await log_in()
-        return client, cookie_header, xsrf_token
+        return await log_in()
 
     try:
         await client.async_fetch_sims(
@@ -177,9 +202,9 @@ async def _async_client_with_session(
         if not has_credentials(entry):
             raise
         _LOGGER.debug("Stored session expired; logging in to list SIMs")
-        cookie_header, xsrf_token = await log_in()
+        return await log_in()
 
-    return client, cookie_header, xsrf_token
+    return cookie_header, xsrf_token
 
 
 async def _async_validate(
@@ -211,6 +236,17 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
         self._cookie_header: str | None = None
         self._xsrf_token: str | None = None
         self._reconfigure_entry: ConfigEntry | None = None
+        # One client (and therefore one aiohttp session) for this invocation, so
+        # retrying a step -- a mistyped password, an unreadable dashboard -- does
+        # not leave another connector behind.
+        self._client: MozillionClient | None = None
+
+    def _async_client(self) -> MozillionClient:
+        """Return this flow's client, building its session on first use."""
+
+        if self._client is None:
+            self._client = _dedicated_client(self.hass)
+        return self._client
 
     # Must be a classmethod: HA looks the handler up in HANDLERS and calls this
     # on the class, so an instance method raised
@@ -233,11 +269,18 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            client = MozillionClient(async_create_clientsession(self.hass))
+            client = self._async_client()
             try:
                 data = await _async_authenticate(client, dict(user_input))
             except ValueError:
                 errors["base"] = "missing_auth"
+            # Before RuntimeError: MozillionAuthError subclasses it, and a rejected
+            # password is a wrong password, not an unreachable server.
+            except MozillionAuthError:
+                _LOGGER.debug(
+                    "Mozillion rejected the credentials entered in the user step"
+                )
+                errors["base"] = "invalid_auth"
             except RuntimeError:
                 _LOGGER.exception("Login failed during user step")
                 errors["base"] = "cannot_connect"
@@ -278,7 +321,8 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
                         description={"advanced": True},
                     ): selector.NumberSelector(
                         selector.NumberSelectorConfig(
-                            mode=selector.NumberSelectorMode.BOX, min=60
+                            mode=selector.NumberSelectorMode.BOX,
+                            min=MIN_SCAN_INTERVAL,
                         )
                     ),
                 }
@@ -299,7 +343,12 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             sim = choices.get(user_input["sim"])
-            if sim is not None and await self._async_validate_sim(sim):
+            if sim is not None and await self._async_validate_sim(
+                self._async_client(),
+                self._cookie_header or "",
+                self._xsrf_token,
+                sim,
+            ):
                 return self._create_account(sim)
             errors["base"] = "cannot_connect"
 
@@ -322,7 +371,12 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
                 order_detail_id=str(user_input[CONF_ORDER_DETAIL_ID]),
                 sim_number=str(user_input.get(CONF_SIM_NUMBER) or ""),
             )
-            if await self._async_validate_sim(sim):
+            if await self._async_validate_sim(
+                self._async_client(),
+                self._cookie_header or "",
+                self._xsrf_token,
+                sim,
+            ):
                 return self._create_account(sim)
             errors["base"] = "cannot_connect"
 
@@ -338,16 +392,17 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def _async_validate_sim(self, sim: MozillionSim) -> bool:
+    async def _async_validate_sim(
+        self,
+        client: MozillionClient,
+        cookie_header: str,
+        xsrf_token: str | None,
+        sim: MozillionSim,
+    ) -> bool:
         """Check this session can actually read the SIM before saving it."""
 
         try:
-            await _async_validate(
-                MozillionClient(async_create_clientsession(self.hass)),
-                self._cookie_header or "",
-                self._xsrf_token,
-                sim,
-            )
+            await _async_validate(client, cookie_header, xsrf_token, sim)
         except RuntimeError:
             _LOGGER.exception("Validation failed for the selected SIM")
             return False
@@ -404,11 +459,18 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
         existing = self._get_reauth_entry()
 
         if user_input is not None:
-            client = MozillionClient(async_create_clientsession(self.hass))
+            client = self._async_client()
             try:
                 updated = await _async_authenticate(client, dict(user_input))
             except ValueError:
                 errors["base"] = "missing_auth"
+            # Before RuntimeError, which MozillionAuthError subclasses: the password
+            # was rejected rather than the connection failing.
+            except MozillionAuthError:
+                _LOGGER.debug(
+                    "Mozillion rejected the credentials entered during reauth"
+                )
+                errors["base"] = "invalid_auth"
             except RuntimeError:
                 _LOGGER.exception("Reauth login failed")
                 errors["base"] = "cannot_connect"
@@ -426,7 +488,7 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_SESSION_COOKIE: updated.get(CONF_SESSION_COOKIE, ""),
                     CONF_XSRF_TOKEN: updated.get(CONF_XSRF_TOKEN, ""),
                 }
-                if await self._async_validate_entry(existing, new_data):
+                if await self._async_validate_entry(client, existing, new_data):
                     return self.async_update_reload_and_abort(
                         existing,
                         data=new_data,
@@ -457,11 +519,18 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            client = MozillionClient(async_create_clientsession(self.hass))
+            client = self._async_client()
             try:
                 data = await _async_authenticate(client, dict(user_input))
             except ValueError:
                 errors["base"] = "missing_auth"
+            # Before RuntimeError, which MozillionAuthError subclasses: the password
+            # was rejected rather than the connection failing.
+            except MozillionAuthError:
+                _LOGGER.debug(
+                    "Mozillion rejected the credentials entered during reconfigure"
+                )
+                errors["base"] = "invalid_auth"
             except RuntimeError:
                 _LOGGER.exception("Reconfigure login failed")
                 errors["base"] = "cannot_connect"
@@ -478,7 +547,7 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_SESSION_COOKIE: data.get(CONF_SESSION_COOKIE, ""),
                     CONF_XSRF_TOKEN: data.get(CONF_XSRF_TOKEN, ""),
                 }
-                if await self._async_validate_entry(entry, new_data):
+                if await self._async_validate_entry(client, entry, new_data):
                     if entry.version != self.VERSION:
                         self.hass.config_entries.async_update_entry(
                             entry, version=self.VERSION
@@ -495,7 +564,10 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def _async_validate_entry(
-        self, entry: ConfigEntry, data: dict[str, Any]
+        self,
+        client: MozillionClient,
+        entry: ConfigEntry,
+        data: dict[str, Any],
     ) -> bool:
         """Check the new session by reading one of the account's SIMs."""
 
@@ -509,7 +581,7 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
         subentry = sims[0]
         try:
             await _async_validate(
-                MozillionClient(async_create_clientsession(self.hass)),
+                client,
                 data.get(CONF_SESSION_COOKIE, ""),
                 data.get(CONF_XSRF_TOKEN),
                 MozillionSim(
@@ -544,6 +616,16 @@ class SimSubentryFlowHandler(ConfigSubentryFlow):
     # it is creating a subentry or updating one.
     _reconfiguring: bool = False
 
+    # One client per flow invocation, created on first use by `_async_client`.
+    _client: MozillionClient | None = None
+
+    def _async_client(self) -> MozillionClient:
+        """Return this flow's client, building its session on first use."""
+
+        if self._client is None:
+            self._client = _dedicated_client(self.hass)
+        return self._client
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
@@ -571,7 +653,16 @@ class SimSubentryFlowHandler(ConfigSubentryFlow):
                 order_detail_id=str(user_input[CONF_ORDER_DETAIL_ID]),
                 sim_number=str(user_input.get(CONF_SIM_NUMBER) or ""),
             )
-            if await self._async_finish(sim):
+            client = self._async_client()
+            try:
+                cookie_header, xsrf_token = await _async_session_for_entry(
+                    client, self._get_entry()
+                )
+                saved = await self._async_finish(sim, client, cookie_header, xsrf_token)
+            except RuntimeError:
+                _LOGGER.exception("Could not read the Mozillion session")
+                saved = False
+            if saved:
                 return self._result_for(sim, self._reconfiguring)
             errors["base"] = "cannot_connect"
 
@@ -597,10 +688,11 @@ class SimSubentryFlowHandler(ConfigSubentryFlow):
         if entry.state is not ConfigEntryState.LOADED:
             return self.async_abort(reason="entry_not_loaded")
 
+        # One client for the whole invocation: the SIM list read and the later
+        # validation share it, so an add-SIM attempt opens one session, not three.
+        client = self._async_client()
         try:
-            client, cookie_header, xsrf_token = await _async_client_with_session(
-                self.hass, entry
-            )
+            cookie_header, xsrf_token = await _async_session_for_entry(client, entry)
             sims = await client.async_fetch_sims(
                 cookie_header=cookie_header, xsrf_token=xsrf_token
             )
@@ -629,7 +721,7 @@ class SimSubentryFlowHandler(ConfigSubentryFlow):
             sim = choices.get(user_input["sim"])
             if sim is None:
                 errors["base"] = "cannot_connect"
-            elif await self._async_finish(sim):
+            elif await self._async_finish(sim, client, cookie_header, xsrf_token):
                 return self._result_for(sim, reconfigure)
             else:
                 errors["base"] = "cannot_connect"
@@ -645,14 +737,21 @@ class SimSubentryFlowHandler(ConfigSubentryFlow):
             errors=errors,
         )
 
-    async def _async_finish(self, sim: MozillionSim) -> bool:
-        """Validate the SIM against the API before saving it."""
+    async def _async_finish(
+        self,
+        sim: MozillionSim,
+        client: MozillionClient,
+        cookie_header: str,
+        xsrf_token: str | None,
+    ) -> bool:
+        """Validate the SIM against the API before saving it.
 
-        entry = self._get_entry()
+        The client and cookies come from the step that started the flow: an
+        add-SIM submission must not open a second session just to re-check the
+        credentials it has already read.
+        """
+
         try:
-            client, cookie_header, xsrf_token = await _async_client_with_session(
-                self.hass, entry
-            )
             await _async_validate(client, cookie_header, xsrf_token, sim)
         except RuntimeError:
             _LOGGER.exception("Validation failed for the selected SIM")
@@ -702,6 +801,16 @@ class MozillionOptionsFlowHandler(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
-                {vol.Optional(CONF_SCAN_INTERVAL, default=current): int}
+                {
+                    # Same floor as the setup form's NumberSelector: below a minute
+                    # the poller exhausts Mozillion's request budget and every poll
+                    # comes back rate-limited. The bound belongs to the form schema
+                    # so a sub-minute value is refused before it can be saved --
+                    # Home Assistant answers the dialog with this field's error and
+                    # keeps the flow open instead of storing it.
+                    vol.Optional(CONF_SCAN_INTERVAL, default=current): vol.All(
+                        vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)
+                    )
+                }
             ),
         )

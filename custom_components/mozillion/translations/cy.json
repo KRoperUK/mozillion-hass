@@ -55,6 +55,7 @@
     },
     "error": {
       "cannot_connect": "Methu cysylltu. Gwiriwch eich dilysiadau, y pennawd Cookie, ac a yw'r SIM yn dal ar eich cyfrif.",
+      "invalid_auth": "Gwrthododd Mozillion y dilysiadau hynny. Gwiriwch yr e-bost, y cyfrinair a'r gyfrinach TOTP, yna rhowch gynnig arall arni.",
       "missing_auth": "Rhowch naill ai e-bost a chyfrinair (a TOTP yn ddewisol) neu bennawd Cookie."
     },
     "abort": {

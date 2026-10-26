@@ -193,8 +193,33 @@ async def test_entry_is_unique_per_account(hass: HomeAssistant) -> None:
     assert second["reason"] == "already_configured"
 
 
-async def test_failed_login_shows_cannot_connect(hass: HomeAssistant) -> None:
+async def test_failed_login_shows_invalid_auth(hass: HomeAssistant) -> None:
+    """A rejected password is the user's mistake, not a broken connection.
+
+    ``MozillionAuthError`` subclasses ``RuntimeError``, so catching ``RuntimeError``
+    first reported the wrong password as "Cannot connect" and sent the user off to
+    check their network.
+    """
+
     client = _mock_client(login_error=MozillionAuthError("bad password"))
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert result["errors"]["base"] == "invalid_auth"
+
+
+async def test_a_network_failure_still_shows_cannot_connect(
+    hass: HomeAssistant,
+) -> None:
+    """Only the credential rejection gets its own error; everything else stays."""
+
+    client = _mock_client(login_error=RuntimeError("connection reset"))
 
     with patch(CLIENT, return_value=client):
         result = await _start_user_flow(hass)
@@ -262,6 +287,38 @@ async def test_flow_builds_its_client_on_a_dedicated_session(
             result["flow_id"], _login_input()
         )
 
+    session.assert_called_once_with(hass)
+
+
+async def test_a_retried_login_reuses_the_flow_session(hass: HomeAssistant) -> None:
+    """A flow owns one session for its whole life, not one per attempt.
+
+    Home Assistant only closes flow sessions when the instance stops, so a wrong
+    password followed by a right one must not leave two open connectors behind.
+    """
+
+    client = _mock_client(login_error=MozillionAuthError("bad password"))
+
+    with (
+        patch(CLIENT, return_value=client),
+        patch(
+            "custom_components.mozillion.config_flow.async_create_clientsession"
+        ) as session,
+    ):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+        assert result["errors"]["base"] == "invalid_auth"
+
+        client.async_login = AsyncMock(
+            return_value=("mozillion_session=abc; XSRF-TOKEN=xyz", "xyz")
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+
+    assert result["step_id"] == "select_sim"
     session.assert_called_once_with(hass)
 
 
@@ -352,7 +409,9 @@ async def test_reauth_updates_the_stored_session(hass: HomeAssistant) -> None:
     assert result["reason"] == "reauth_successful"
 
 
-async def test_reauth_rejects_a_failed_login(hass: HomeAssistant) -> None:
+async def test_reauth_shows_invalid_auth_for_rejected_credentials(
+    hass: HomeAssistant,
+) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="Mozillion",
@@ -373,6 +432,35 @@ async def test_reauth_rejects_a_failed_login(hass: HomeAssistant) -> None:
         )
         assert result["step_id"] == "reauth_confirm"
 
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _credentials_only(_login_input())
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["errors"]["base"] == "invalid_auth"
+
+
+async def test_reauth_shows_cannot_connect_for_a_network_failure(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Mozillion",
+        data=dict(MOCK_ENTRY_DATA_COOKIE),
+        unique_id="7654321",
+        version=2,
+    )
+    entry.add_to_hass(hass)
+    client = _mock_client(login_error=RuntimeError("connection reset"))
+
+    with patch(CLIENT, return_value=client):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_REAUTH,
+                "entry_id": entry.entry_id,
+            },
+        )
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], _credentials_only(_login_input())
         )
@@ -406,6 +494,78 @@ async def test_options_flow_updates_scan_interval(hass: HomeAssistant) -> None:
 
     assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
     assert result["data"] == {CONF_SCAN_INTERVAL: 7200}
+
+
+async def test_options_flow_accepts_the_minimum_scan_interval(
+    hass: HomeAssistant,
+) -> None:
+    """The floor itself is a valid answer; only less than a minute is refused."""
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Mozillion",
+        data=dict(MOCK_ENTRY_DATA_COOKIE),
+        unique_id="7654321",
+        version=2,
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_SCAN_INTERVAL: 60}
+    )
+
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["data"] == {CONF_SCAN_INTERVAL: 60}
+
+
+@pytest.mark.parametrize("interval", [0, 1, 59])
+async def test_options_flow_rejects_a_scan_interval_below_the_minimum(
+    hass: HomeAssistant, interval: int
+) -> None:
+    """A sub-minute interval is refused by the form instead of being stored.
+
+    Below a minute the coordinator polls ``timedelta(seconds=interval)`` around the
+    clock, spends Mozillion's per-window request budget and every poll comes back
+    rate-limited -- so the options dialog carries the same floor as the setup
+    dialog. The bound lives in the form's schema, which is what makes Home
+    Assistant reject the submission: it raises ``InvalidData`` carrying the field
+    error the dialog shows (``{"scan_interval": ...}``) and the flow stays open, so
+    nothing is written to the entry's options. The setup form's
+    ``NumberSelector(min=60)`` behaves the same way.
+    """
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Mozillion",
+        data=dict(MOCK_ENTRY_DATA_COOKIE),
+        unique_id="7654321",
+        version=2,
+    )
+    entry.add_to_hass(hass)
+    options_before = dict(entry.options)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    with pytest.raises(data_entry_flow.InvalidData) as rejection:
+        await hass.config_entries.options.async_configure(
+            result["flow_id"], {CONF_SCAN_INTERVAL: interval}
+        )
+
+    # The refusal is reported on the form, against the field that was filled in.
+    assert rejection.value.schema_errors, "the dialog needs something to display"
+    assert CONF_SCAN_INTERVAL in rejection.value.schema_errors
+    # Nothing reached the entry, so the coordinator keeps polling at its old rate.
+    assert entry.options == options_before
+    # The dialog is still open and still usable: the same flow takes a valid value.
+    assert [
+        progress["flow_id"] for progress in hass.config_entries.options.async_progress()
+    ] == [result["flow_id"]]
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_SCAN_INTERVAL: 60}
+    )
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["data"] == {CONF_SCAN_INTERVAL: 60}
 
 
 # ---------------------------------------------------------------------------
@@ -453,7 +613,9 @@ async def test_reconfigure_updates_credentials_and_keeps_the_sims(
     assert entry.version == 3
 
 
-async def test_reconfigure_rejects_a_failed_login(hass: HomeAssistant) -> None:
+async def test_reconfigure_shows_invalid_auth_for_rejected_credentials(
+    hass: HomeAssistant,
+) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="Mozillion",
@@ -463,6 +625,36 @@ async def test_reconfigure_rejects_a_failed_login(hass: HomeAssistant) -> None:
     )
     entry.add_to_hass(hass)
     client = _mock_client(login_error=MozillionAuthError("bad"))
+
+    with patch(CLIENT, return_value=client):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_RECONFIGURE,
+                "entry_id": entry.entry_id,
+            },
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _credentials_only(_login_input())
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "reconfigure_confirm"
+    assert result["errors"]["base"] == "invalid_auth"
+
+
+async def test_reconfigure_shows_cannot_connect_for_a_network_failure(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Mozillion",
+        data=dict(MOCK_ENTRY_DATA_COOKIE),
+        unique_id="7654321",
+        version=2,
+    )
+    entry.add_to_hass(hass)
+    client = _mock_client(login_error=RuntimeError("connection reset"))
 
     with patch(CLIENT, return_value=client):
         result = await hass.config_entries.flow.async_init(

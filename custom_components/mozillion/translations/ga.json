@@ -55,6 +55,7 @@
     },
     "error": {
       "cannot_connect": "Ní féidir ceangal. Seiceáil do dhintiúirí, an ceanntásc Cookie, agus go bhfuil an SIM fós ar do chuntas.",
+      "invalid_auth": "Dhiúltaigh Mozillion do na dintiúirí sin. Seiceáil an ríomhphost, an focal faire agus an rún TOTP, ansin triail arís.",
       "missing_auth": "Tabhair ríomhphost agus pasfhocal (agus TOTP go roghnach), nó ceanntásc Cookie."
     },
     "abort": {

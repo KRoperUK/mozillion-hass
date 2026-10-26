@@ -55,6 +55,7 @@
     },
     "error": {
       "cannot_connect": "Connexion impossible. Vérifiez vos identifiants, l'en-tête Cookie et que la SIM est toujours associée à votre compte.",
+      "invalid_auth": "Mozillion a refusé ces identifiants. Vérifiez l'adresse e-mail, le mot de passe et le secret TOTP, puis réessayez.",
       "missing_auth": "Fournissez soit une adresse e-mail et un mot de passe (et éventuellement le TOTP), soit un en-tête Cookie."
     },
     "abort": {
