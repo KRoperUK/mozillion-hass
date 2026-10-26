@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -89,7 +90,9 @@ def _sensor_ending(hass: HomeAssistant, suffix: str) -> State:
     raise AssertionError(f"no sensor ending in {suffix!r}")
 
 
-async def test_setup_creates_the_expected_entities(hass: HomeAssistant) -> None:
+async def test_setup_creates_the_expected_entities(
+    hass: HomeAssistant, frozen_today: date
+) -> None:
     entry = _entry(hass)
 
     with patch(CLIENT, return_value=_client()):
@@ -104,7 +107,8 @@ async def test_setup_creates_the_expected_entities(hass: HomeAssistant) -> None:
     assert _sensor_ending(hass, "_total").state == "10.0"
     assert _sensor_ending(hass, "_remaining").state == "6.5"
     assert _sensor_ending(hass, "_usage_percentage").state == "35.0"
-    # The dashboard-derived extras.
+    # The dashboard-derived extras. The clock is pinned so the rolled-forward
+    # reset date does not depend on the day the suite happens to run.
     assert _sensor_ending(hass, "_data_resets").state == "2026-10-19"
     assert _sensor_ending(hass, "_wallet_balance").state == "9.5"
     assert _sensor_ending(hass, "_out_of_bundle_spend").state == "2.5"

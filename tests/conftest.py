@@ -288,6 +288,34 @@ def sim_subentry(entry: ConfigEntry) -> ConfigSubentry:
     )
 
 
+# ---------------------------------------------------------------------------
+# A pinned clock for reset-date assertions
+# ---------------------------------------------------------------------------
+# ``parse_reset_date`` reads the wall clock: a label with no year ("19 Oct") is
+# rolled forward to its next occurrence, so an expected date is only correct
+# until the fixture's day of the month comes round. ``api.py`` does
+# ``from datetime import date``, so patching that module attribute is the seam;
+# a subclass keeps the date constructor working because ``parse_reset_date``
+# also builds dates to validate the label. 2026-09-21 puts "19 Oct" in the
+# future, so the rolled-forward answer is 2026-10-19.
+PINNED_TODAY = date(2026, 9, 21)
+
+
+class _PinnedDate(date):
+    """A ``date`` whose ``today()`` never moves."""
+
+    @classmethod
+    def today(cls) -> date:
+        return PINNED_TODAY
+
+
+@pytest.fixture
+def frozen_today(monkeypatch: pytest.MonkeyPatch) -> date:
+    """Pin the clock ``parse_reset_date`` reads and report the pinned date."""
+    monkeypatch.setattr("custom_components.mozillion.api.date", _PinnedDate)
+    return PINNED_TODAY
+
+
 @pytest.fixture
 def mock_config_entry() -> MockConfigEntry:
     """Return a mock config entry using cookie auth."""
