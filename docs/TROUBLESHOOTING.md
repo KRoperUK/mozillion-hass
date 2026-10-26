@@ -44,10 +44,10 @@ keeping the last known values in the recorder.
 
 ### Sensors show "unknown"
 
-The request succeeded but the figures did not parse. Check the `raw` attribute on
-any sensor — it contains the exact payload the integration received. If Mozillion
-has changed its field names, the `raw` attribute is what to include in a bug
-report.
+The request succeeded but the figures did not parse. The diagnostics download
+(⋮ → *Download diagnostics*) contains the exact payload the integration received
+for each SIM. If Mozillion has changed its field names, that download is what to
+include in a bug report.
 
 ### Usage never updates
 
@@ -97,8 +97,8 @@ is exactly what the Mozillion dashboard does.
 
 Mozillion returns three pairs — `usedData`/`totalData`,
 `usedDataGbr`/`totalDataGbr` and `usedDataGlobal`/`totalDataGlobal`. The
-headline pair drives the sensors. The other two are exposed as attributes on
-each sensor but their exact meaning is unverified; see the "Known limitations"
+headline pair drives the sensors. The other two are exposed as attributes on the
+usage sensor but their exact meaning is unverified; see the "Known limitations"
 section of the [documentation](index.md#known-limitations).
 
 ## Reporting a problem

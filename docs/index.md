@@ -50,14 +50,22 @@ The wallet figures and the port status are **unavailable** rather than misleadin
 when they have nothing to say: a SIM with no wallet answers all zeros with
 `reached: true`, and a SIM whose number was never ported reports no status.
 
-The SIM status sensor carries the rest of what the dashboard publishes as
-attributes: the plan (`plan_tariff`, `plan_duration`, `plan_roaming`,
-`plan_texts_minutes`, `plan_is_data_only`, `plan_voicemail`,
-`plan_parental_control`), the porting detail (`port_status`,
-`port_status_description`, `port_date`), the billing fields (`billing_amount`,
-`has_bill`, `billing_days`), and the raw payload. The four usage sensors also
-expose a per-bucket breakdown (`usage_gbr` / `total_gbr`, `usage_global` /
-`total_global`). See [Known limitations](#known-limitations).
+### Attributes
+
+Everything the dashboard publishes that has no entity of its own is an attribute,
+and each one is published **once** per SIM — a value is never repeated on another
+entity of the same device.
+
+| Entity | Attributes |
+| --- | --- |
+| Usage | The plan (`plan_tariff`, `plan_duration`, `plan_roaming`, `plan_texts_minutes`, `plan_is_data_only`, `plan_voicemail`, `plan_parental_control`), the porting detail (`port_status`, `port_status_description`, `port_date`), the billing fields (`billing_amount`, `has_bill`, `billing_days`), the reset wording (`reset_label`, `days_left`), the per-bucket breakdown (`usage_gbr` / `total_gbr`, `usage_global` / `total_global`) and `unlimited` |
+| Overspend limit reached | `wallet` — the payload the flag is derived from |
+
+Every other entity carries no attributes at all: `usage`, `total`, `remaining`,
+`usage_percentage` and `unlimited` are entity states, and the raw
+`/get-data-usage` response is part of the diagnostics download rather than of the
+state machine. See [Known limitations](#known-limitations) for what the attribute
+figures do and do not mean.
 
 ## Data updates
 
@@ -153,14 +161,14 @@ blueprint covers every SIM you add.
 - **The billing figures are unverified.** `billing_amount` is passed through
   exactly as the page publishes it. The page states no currency and does not say
   whether the value is in pounds or pence, and the copy beside it only reads
-  "Paid in full / No upcoming bill", so it is exposed as a raw attribute and no
-  unit is claimed.
+  "Paid in full / No upcoming bill", so it is exposed unwrapped as an attribute
+  of the usage sensor and no unit is claimed.
 - **The per-bucket figures are unverified.** Mozillion returns `usedData`/
   `totalData` alongside `usedDataGbr`/`totalDataGbr` and `usedDataGlobal`/
   `totalDataGlobal`. The headline pair drives the sensors because that is what
   the website renders, but which roaming bucket each pair represents has not
   been confirmed against Mozillion's own documentation, so the buckets are
-  exposed as attributes rather than entities of their own.
+  exposed as attributes of the usage sensor rather than entities of their own.
 - **The SIM list is scraped from HTML.** Mozillion has no public API for the
   dashboard. If the page markup changes, setup falls back to manual entry of the
   order detail id and SIM meta id.
@@ -169,7 +177,7 @@ blueprint covers every SIM you add.
 - **The reset date is inferred.** The dashboard gives a day and month with no year
   (`19 Oct`). Because Mozillion's resets recur monthly — the label moves on to the
   next month once a reset passes — the date shown is the next occurrence of that day.
-  The raw label and the day count are exposed as attributes on the sensor, so
+  The raw label and the day count are exposed as attributes on the usage sensor, so
   Mozillion's own wording is never hidden.
 - **Your plan's allowance is not the allowance you can use abroad.** Mozillion caps
   how much of a plan's data can be used in the EU, and that cap varies by plan and is
