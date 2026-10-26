@@ -181,6 +181,53 @@ async def test_adding_a_sim_creates_a_subentry(hass: HomeAssistant) -> None:
     assert sim_subentry(entry).subentry_id != added.subentry_id
 
 
+async def test_one_session_is_created_for_the_whole_add_sim_flow(
+    hass: HomeAssistant,
+) -> None:
+    """An add-SIM submission owns one session, and it is the one that validates.
+
+    Home Assistant only auto-closes a flow's session when the instance stops, so
+    the read that lists the SIMs and the read that validates the chosen SIM have to
+    share the client the flow built -- this used to open a second one in
+    ``_async_finish`` and a third while validating.
+    """
+
+    session = MagicMock(name="flow session")
+    clients: list[MagicMock] = []
+
+    def _build_client(http_session: Any) -> MagicMock:
+        assert http_session is session, "the client must sit on the flow's session"
+        client = _client([MOCK_SIM, SECOND_SIM])
+        clients.append(client)
+        return client
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+
+    with (
+        patch(CLIENT, return_value=_client([MOCK_SIM, SECOND_SIM])),
+        patch(
+            "custom_components.mozillion.config_flow.async_create_clientsession",
+            return_value=session,
+        ) as create_session,
+        patch(FLOW_CLIENT, side_effect=_build_client),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id) is True
+        await hass.async_block_till_done()
+
+        result = await _start_flow(hass, entry)
+        result = await hass.config_entries.subentries.async_configure(
+            result["flow_id"], {"sim": SECOND_SIM.display_name}
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    create_session.assert_called_once_with(hass)
+    assert len(clients) == 1, "one client per flow invocation, not per step"
+    # The validation read ran on that same client, not on a fresh one.
+    clients[0].async_get_usage.assert_awaited_once()
+
+
 async def test_a_fully_tracked_account_aborts(hass: HomeAssistant) -> None:
     """With every SIM already on the account there is nothing to add."""
 
@@ -210,7 +257,7 @@ async def test_manual_ids_create_the_subentry(hass: HomeAssistant) -> None:
     """Entering ids by hand still validates against the API before saving."""
 
     client = _client([MOCK_SIM])
-    # The dashboard read fails once and then recovers. `_async_client_with_session`
+    # The dashboard read fails once and then recovers. `_async_session_for_entry`
     # probes the session with the same call, so a permanent failure would make the
     # validation in `_async_finish` fail too and the SIM could never be saved.
     calls = {"n": 0}

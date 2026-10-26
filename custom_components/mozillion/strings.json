@@ -55,6 +55,7 @@
     },
     "error": {
       "cannot_connect": "Cannot connect. Check your credentials, cookie header and that the SIM is still on your account.",
+      "invalid_auth": "Mozillion rejected those credentials. Check the email, password and TOTP secret, then try again.",
       "missing_auth": "Provide either email+password (and optional TOTP) or a cookie header."
     },
     "abort": {

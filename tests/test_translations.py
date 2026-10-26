@@ -167,7 +167,10 @@ def test_flow_reason_strings_are_translated(strings) -> None:
     """Abort and error reasons the flow can raise must have text."""
     config = strings["config"]
     assert {"reauth_successful", "already_configured"} <= set(config["abort"])
-    assert {"cannot_connect", "missing_auth"} <= set(config["error"])
+    # `invalid_auth` is the rejected-password answer; without it a wrong password
+    # falls back to the raw key in the dialog. Setup, reauth and reconfigure all
+    # report their errors through this shared block.
+    assert {"cannot_connect", "invalid_auth", "missing_auth"} <= set(config["error"])
 
 
 # ---------------------------------------------------------------------------
