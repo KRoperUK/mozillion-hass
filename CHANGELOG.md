@@ -5,6 +5,27 @@
 
 * **coordinator:** transparently re-authenticate on expired sessions ([a3eafa2](https://github.com/KRoperUK/mozillion-hass/commit/a3eafa25900f4f5f93a5cfa9bd8b022e419f3798))
 
+## [1.0.1](https://github.com/KRoperUK/mozillion-hass/compare/v1.0.0...v1.0.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* keep SIM identifiers out of entity attributes, device names and logs ([cc37488](https://github.com/KRoperUK/mozillion-hass/commit/cc3748833993212a42287355946e6d7f111c310b))
+* keep SIM identifiers out of entity attributes, device names and logs ([3b5f693](https://github.com/KRoperUK/mozillion-hass/commit/3b5f69322d06dfbebd05aa0ec1c6b66463fe9c75))
+* keep SIM identifiers out of entity attributes, device names and logs ([#75](https://github.com/KRoperUK/mozillion-hass/issues/75)) ([cc37488](https://github.com/KRoperUK/mozillion-hass/commit/cc3748833993212a42287355946e6d7f111c310b))
+* stop reloading the entry on session refresh and use HA's date for the reset sensor ([3aa0b12](https://github.com/KRoperUK/mozillion-hass/commit/3aa0b12e3588ee71cf6e2abbc08f3ed55911c078))
+* stop reloading the entry on session refresh and use HA's date for the reset sensor ([46b34f9](https://github.com/KRoperUK/mozillion-hass/commit/46b34f937f5152757ff2063cba6186134e084ca3)), closes [#65](https://github.com/KRoperUK/mozillion-hass/issues/65) [#68](https://github.com/KRoperUK/mozillion-hass/issues/68)
+* stop reloading the entry on session refresh and use HA's date for the reset sensor ([#77](https://github.com/KRoperUK/mozillion-hass/issues/77)) ([3aa0b12](https://github.com/KRoperUK/mozillion-hass/commit/3aa0b12e3588ee71cf6e2abbc08f3ed55911c078))
+* validate the poll interval, report bad credentials and reuse one session per flow ([4d16fab](https://github.com/KRoperUK/mozillion-hass/commit/4d16fab5b894b25c0825a66008eda5be36426cf3))
+* validate the poll interval, report bad credentials and reuse one session per flow ([5fcd97b](https://github.com/KRoperUK/mozillion-hass/commit/5fcd97beb9b93f11c151f3593d4e877511bd376f))
+* validate the poll interval, report bad credentials and reuse one session per flow ([#76](https://github.com/KRoperUK/mozillion-hass/issues/76)) ([4d16fab](https://github.com/KRoperUK/mozillion-hass/commit/4d16fab5b894b25c0825a66008eda5be36426cf3))
+
+
+### Performance Improvements
+
+* read the dashboard once per account instead of once per SIM ([a207d34](https://github.com/KRoperUK/mozillion-hass/commit/a207d34fd43dc0a56487c3a789492f12966a3cae))
+* read the dashboard once per account instead of once per SIM ([abbcacc](https://github.com/KRoperUK/mozillion-hass/commit/abbcaccde95db017776a623a3a79e228ef5975b8)), closes [#73](https://github.com/KRoperUK/mozillion-hass/issues/73)
+
 ## [1.0.0](https://github.com/KRoperUK/mozillion-hass/compare/v0.6.1...v1.0.0) (2026-10-17)
 
 
