@@ -13,8 +13,6 @@ from . import MozillionConfigEntry
 from .const import (
     ATTR_OVERSPEND_LIMIT_REACHED,
     ATTR_UNLIMITED,
-    ATTR_USAGE,
-    ATTR_USAGE_PERCENTAGE,
     ATTR_WALLET,
     SUBENTRY_TYPE_SIM,
 )
@@ -62,15 +60,9 @@ class MozillionUnlimitedSensor(MozillionEntity, BinarySensorEntity):
         """Return True when the plan has no data cap."""
         return bool(self.coordinator.data.get(ATTR_UNLIMITED))
 
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose the figures the unlimited flag is derived from."""
-
-        data = self.coordinator.data
-        return {
-            ATTR_USAGE: data.get(ATTR_USAGE),
-            ATTR_USAGE_PERCENTAGE: data.get(ATTR_USAGE_PERCENTAGE),
-        }
+    # No extra attributes: ``usage`` and ``usage_percentage`` are states of their
+    # own entities on this same device, so repeating them here only wrote each
+    # figure into the recorder twice per poll.
 
 
 class MozillionOverspendSensor(MozillionEntity, BinarySensorEntity):
@@ -103,6 +95,10 @@ class MozillionOverspendSensor(MozillionEntity, BinarySensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose the raw wallet payload the flag comes from."""
+        """Expose the raw wallet payload the flag comes from.
+
+        The only place the wallet payload is published: every other entity on the
+        device leaves it alone rather than repeating it.
+        """
 
         return {ATTR_WALLET: self.coordinator.data.get(ATTR_WALLET)}

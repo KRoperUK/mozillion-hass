@@ -42,8 +42,11 @@ unlimited.
 - Automated login with email/password and optional TOTP secret (accepts the
   Base32 secret or the whole `otpauth://` link)
 - Manual cookie + XSRF token mode if you would rather not store a password
-- Four sensors — usage, total, remaining and percentage — plus raw payload and
-  per-bucket attributes
+- Sensors for usage, total, remaining and percentage, plus data reset, wallet
+  balance and spend, port status and SIM status
+- Attributes published once per SIM: the plan, porting and billing detail and the
+  per-bucket breakdown ride on the usage sensor, the wallet payload on the
+  overspend flag
 - Unlimited plan binary sensor
 - Transparent re-authentication, with reauth and reconfigure flows
 - Redacted diagnostics downloads
