@@ -12,6 +12,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiohttp import ClientError
 from custom_components.mozillion import MozillionAuthError, MozillionCoordinator
+from custom_components.mozillion import api as api_module
+from custom_components.mozillion import coordinator as coordinator_module
 from custom_components.mozillion.const import (
     ATTR_DAYS_LEFT,
     ATTR_ICCID,
@@ -266,13 +268,18 @@ class TestCoordinatorUpdate:
             await coordinator._async_update_data()
 
     @pytest.mark.asyncio
-    async def test_client_error_raises_update_failed(self) -> None:
-        """ClientError is wrapped in UpdateFailed."""
+    async def test_a_leaked_client_error_is_not_swallowed(self) -> None:
+        """MozillionClient converts ClientError into RuntimeError at its boundary.
+
+        The coordinator deliberately does not catch aiohttp's exception: if one
+        ever gets past the client that is a boundary bug, so it must surface
+        rather than be quietly turned into an ordinary UpdateFailed.
+        """
         client = _client()
         client.async_get_usage.side_effect = ClientError("timeout")
         coordinator = _make_coordinator(client)
 
-        with pytest.raises(UpdateFailed):
+        with pytest.raises(ClientError):
             await coordinator._async_update_data()
 
     @pytest.mark.asyncio
@@ -389,12 +396,16 @@ class TestCoordinatorUpdate:
 
     @pytest.mark.asyncio
     async def test_auth_error_then_network_error_is_transient(self) -> None:
-        """A failure on the retry that is not auth-related is just transient."""
+        """A failure on the retry that is not auth-related is just transient.
+
+        MozillionClient turns aiohttp's ClientError into a RuntimeError at the
+        API boundary, so that is the exception a network blip arrives as.
+        """
         client = _client()
         client.async_login.return_value = ("new-cookie", "new-xsrf")
         client.async_get_usage.side_effect = [
             MozillionAuthError("expired"),
-            ClientError("network blip"),
+            RuntimeError("Error communicating with Mozillion: network blip"),
         ]
 
         coordinator = _make_coordinator(
@@ -423,6 +434,20 @@ class TestCoordinatorUpdate:
 
         with pytest.raises(UpdateFailed, match="site unreachable"):
             await coordinator._async_update_data()
+
+
+class TestSharedParsing:
+    """Number parsing lives in exactly one place (#71).
+
+    The coordinator used to carry its own copy, which had already drifted from
+    the API's: it accepted ``Any`` and swallowed ``TypeError``.
+    """
+
+    def test_the_coordinator_uses_the_api_parser(self) -> None:
+        assert coordinator_module.to_float is api_module.to_float
+
+    def test_the_local_copy_is_gone(self) -> None:
+        assert not hasattr(coordinator_module, "_to_float")
 
 
 class TestNeedsAuth:

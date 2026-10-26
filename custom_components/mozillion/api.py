@@ -247,13 +247,11 @@ class MozillionClient:
             _LOGGER.debug("Extracted %d SIM(s) from the dashboard", len(sims))
             return sims
 
-        # The markup is our only source of SIM ids, so distinguish "the site
-        # changed" from "we got bounced to the login page".
-        if _looks_like_login_page(html):
-            raise MozillionAuthError(
-                "Mozillion returned the login page instead of the dashboard; "
-                "the session has expired"
-            )
+        # A bounced session never gets this far: ``_async_get_text`` classifies
+        # the login page as an expired session while the body is still in hand.
+        # So zero SIMs here means the dashboard really is unreadable -- the
+        # markup changed, or the account has no active SIMs -- and that is a
+        # repair, not a reauth.
         raise RuntimeError(
             "No SIMs found on the Mozillion dashboard. The page markup may have "
             "changed, or the account has no active SIMs."
@@ -407,13 +405,17 @@ class MozillionClient:
         return headers
 
     async def _async_get_text(self, url: str, headers: dict[str, str]) -> str:
-        """GET a URL and return the decoded body."""
+        """GET a page and return the decoded body."""
 
         try:
             async with self._session.get(url, headers=headers) as resp:
                 _raise_for_rate_limit(resp)
+                body = await resp.text()
+                # An expired session answers with the login page (200, HTML),
+                # so the body has to be classified before it is parsed.
+                _raise_if_auth_bounce(resp, body, expect_json=False)
                 resp.raise_for_status()
-                return await resp.text()
+                return body
         except ClientError as err:
             raise RuntimeError(f"Error fetching {url}: {err}") from err
 
@@ -427,8 +429,8 @@ class MozillionClient:
 
         try:
             async with self._session.get(url, headers=headers, params=params) as resp:
-                await _require_authenticated(resp)
                 _raise_for_rate_limit(resp)
+                _raise_if_auth_bounce(resp, await resp.text(), expect_json=True)
                 resp.raise_for_status()
                 try:
                     data = await resp.json(content_type=None)
@@ -447,6 +449,32 @@ class MozillionClient:
 # ----------------------------------------------------------------------
 # Dashboard parsing
 # ----------------------------------------------------------------------
+
+
+def to_float(value: Any) -> float | None:
+    """Coerce a Mozillion value to float, treating blanks and junk as unknown.
+
+    Shared by the dashboard parser and the coordinator: both read numbers the
+    site is free to render as ``""``, ``"n/a"`` or an actual number, and neither
+    may raise on one. Strings are stripped first, because the dashboard's
+    attributes arrive padded, while the JSON payloads hand over real numbers.
+    """
+
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        # The value itself is deliberately not logged. It comes straight off the
+        # dashboard or out of a payload, and the lesson from this repository's own
+        # history is that a scraped field should not reach the log in clear text.
+        _LOGGER.debug("Ignoring a non-numeric Mozillion value")
+        return None
+
 
 # The dashboard renders one <button class="sim-option" data-sim-id="…"> per SIM.
 # Attribute values never contain ">", so matching the opening tag is enough, and
@@ -486,12 +514,12 @@ def parse_sims(html: str) -> list[MozillionSim]:
                 status=attrs.get("data-status", "").strip(),
                 reset_label=attrs.get("data-usage-reset-label", "").strip(),
                 days_left=attrs.get("data-days-left", "").strip(),
-                used_data=_to_float(attrs.get("data-used-data")),
-                total_data=_to_float(attrs.get("data-total-data")),
-                used_data_gbr=_to_float(attrs.get("data-used-data-gbr")),
-                total_data_gbr=_to_float(attrs.get("data-total-data-gbr")),
-                used_data_global=_to_float(attrs.get("data-used-data-global")),
-                total_data_global=_to_float(attrs.get("data-total-data-global")),
+                used_data=to_float(attrs.get("data-used-data")),
+                total_data=to_float(attrs.get("data-total-data")),
+                used_data_gbr=to_float(attrs.get("data-used-data-gbr")),
+                total_data_gbr=to_float(attrs.get("data-total-data-gbr")),
+                used_data_global=to_float(attrs.get("data-used-data-global")),
+                total_data_global=to_float(attrs.get("data-total-data-global")),
                 is_unlimited=_to_bool(attrs.get("data-is-unlimited")),
                 plan_duration=attrs.get("data-plan-duration", "").strip(),
                 plan_data_tariff=attrs.get("data-plan-data-tariff", "").strip(),
@@ -508,18 +536,12 @@ def parse_sims(html: str) -> list[MozillionSim]:
                     "data-port-status-description", ""
                 ).strip(),
                 port_date=attrs.get("data-existing-port-date", "").strip(),
-                billing_amount=_to_float(attrs.get("data-billing-amount")),
+                billing_amount=to_float(attrs.get("data-billing-amount")),
                 has_bill=_to_bool(attrs.get("data-has-bill")),
                 billing_days=attrs.get("data-billing-days", "").strip(),
             )
         )
     return sims
-
-
-def _looks_like_login_page(html: str) -> bool:
-    """Return True when the HTML is Mozillion's login page."""
-
-    return 'name="password"' in html or LOGIN_POST_PATH in html
 
 
 # Mozillion renders the reset label in English, e.g. "19 Oct" or "19 Oct 2026".
@@ -634,24 +656,6 @@ def mask_identifier(value: str | None, keep: int = 3) -> str:
     return f"{text[:keep]}{'*' * (len(text) - keep * 2)}{text[-keep:]}"
 
 
-def _to_float(value: str | None) -> float | None:
-    """Parse a dashboard numeric attribute, treating blanks as unknown."""
-
-    if value is None:
-        return None
-    value = value.strip()
-    if not value:
-        return None
-    try:
-        return float(value)
-    except ValueError:
-        # The value itself is deliberately not logged. It comes straight off the
-        # dashboard, and the lesson from this repository's own history is that a
-        # scraped field should not reach the log in clear text.
-        _LOGGER.debug("Ignoring a non-numeric dashboard value")
-        return None
-
-
 def _to_bool(value: str | None) -> bool:
     """Parse a dashboard boolean attribute ("1"/"true")."""
 
@@ -699,13 +703,28 @@ def _raise_for_rate_limit(resp: ClientResponse) -> None:
     )
 
 
-async def _require_authenticated(resp: ClientResponse) -> None:
-    """Raise MozillionAuthError if the response indicates an expired session.
+def _raise_if_auth_bounce(
+    resp: ClientResponse, body: str, *, expect_json: bool
+) -> None:
+    """Raise MozillionAuthError when a response means the session is gone.
 
-    Mozillion does not return a tidy 401 for an expired session; instead the
-    request is bounced to the HTML login page (HTTP 200, ``text/html``). We
-    detect both the explicit auth status codes and the "got HTML instead of
-    JSON" case so the coordinator can transparently re-authenticate.
+    Mozillion does not answer an expired session with a tidy 401: it bounces the
+    request to the HTML login page, sometimes still with HTTP 200. This is the
+    single place that decides what that looks like, for both the dashboard
+    (HTML) and the JSON endpoints, because the two used to disagree and each
+    could miss a bounce the other caught.
+
+    Three signals, in the order they can be trusted:
+
+    * ``401``/``403`` is a rejection whatever the body says;
+    * a body carrying the login form is the login page, whoever asked for it;
+    * HTML answered to an endpoint that asked for JSON is the login page too,
+      even when the markup is unrecognisable.
+
+    ``expect_json`` is what keeps the third signal honest: the dashboard is
+    served as ``text/html`` on a perfectly healthy session, so treating HTML as
+    a bounce there would fail every poll. The reason strings travel into the
+    coordinator's log line and the repair issue, so they name the evidence.
     """
 
     if isinstance(resp.status, int) and resp.status in (401, 403):
@@ -713,10 +732,20 @@ async def _require_authenticated(resp: ClientResponse) -> None:
             f"Mozillion rejected the request (HTTP {resp.status}); "
             "the session has likely expired"
         )
-    content_type = str(resp.headers.get("Content-Type", ""))
-    if "text/html" in content_type and "application/json" not in content_type:
+
+    if 'name="password"' in body or LOGIN_POST_PATH in body:
         raise MozillionAuthError(
-            "Mozillion returned an HTML login page instead of JSON; "
+            "Mozillion returned the login page; the session has likely expired"
+        )
+
+    content_type = str(resp.headers.get("Content-Type", ""))
+    if (
+        expect_json
+        and "text/html" in content_type
+        and "application/json" not in content_type
+    ):
+        raise MozillionAuthError(
+            "Mozillion returned an HTML page instead of JSON; "
             "the session has likely expired"
         )
 

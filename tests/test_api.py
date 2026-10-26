@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -16,6 +17,7 @@ from custom_components.mozillion.api import (
     mask_identifier,
     parse_reset_date,
     parse_sims,
+    to_float,
 )
 from custom_components.mozillion.const import (
     BASE_URL,
@@ -290,6 +292,44 @@ class TestParseSims:
         assert parse_sims(html)[0].is_unlimited is True
 
 
+class TestToFloat:
+    """The one float parser, shared with the coordinator.
+
+    It used to exist twice and the two copies already disagreed about what they
+    accepted, so the contract is pinned here once.
+    """
+
+    def test_numeric_string(self) -> None:
+        assert to_float("2.19") == 2.19
+
+    def test_padded_string_is_stripped(self) -> None:
+        """Dashboard attributes arrive padded."""
+        assert to_float(" 100 ") == 100.0
+
+    def test_real_numbers_pass_through(self) -> None:
+        """The JSON payloads hand over numbers, not strings."""
+        assert to_float(3.5) == 3.5
+        assert to_float(7) == 7.0
+
+    @pytest.mark.parametrize("value", [None, "", "   "])
+    def test_blank_is_unknown(self, value: str | None) -> None:
+        assert to_float(value) is None
+
+    @pytest.mark.parametrize("value", ["n/a", "Unlimited", [], {}, object()])
+    def test_junk_is_unknown_never_an_error(self, value: Any) -> None:
+        assert to_float(value) is None
+
+    def test_the_offending_value_never_reaches_the_log(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A scraped field must not be logged in clear text."""
+        with caplog.at_level(logging.DEBUG, logger="custom_components.mozillion.api"):
+            assert to_float("07700900000x") is None
+
+        assert "non-numeric" in caplog.text
+        assert "07700900000" not in caplog.text
+
+
 class TestSimDisplayName:
     """Tests for MozillionSim.display_name."""
 
@@ -482,7 +522,11 @@ class TestAsyncFetchSims:
 
     @pytest.mark.asyncio
     async def test_login_page_raises_auth_error(self) -> None:
-        """A bounced session must not look like 'the markup changed'."""
+        """A bounced session must not look like 'the markup changed'.
+
+        The login page is recognised while the body is still in hand, so this
+        fails at the fetch rather than after the dashboard parses to zero SIMs.
+        """
         html = f'<form action="{BASE_URL}/login-post"><input name="password"></form>'
         session = _session(get_responses=(_response(text=html),))
 
@@ -497,8 +541,114 @@ class TestAsyncFetchSims:
         )
 
         client = MozillionClient(session)
-        with pytest.raises(RuntimeError, match="No SIMs found"):
+        with pytest.raises(RuntimeError, match="No SIMs found") as err:
             await client.async_fetch_sims(cookie_header="mozillion_session=abc")
+
+        # An unreadable dashboard is a repair, never a reauth.
+        assert not isinstance(err.value, MozillionAuthError)
+
+
+class TestAuthBounce:
+    """One check decides whether a response means "the session has expired".
+
+    Both the dashboard (HTML) and the JSON endpoints go through it, and each
+    signal has to work on its own: an auth expiry wrongly classified as markup
+    breakage raises a repair the user cannot act on, and a markup break
+    classified as an auth expiry sends them to a reauth that cannot fix it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_401_is_a_bounce_on_the_html_path(self) -> None:
+        """The status code counts even where HTML is the expected answer."""
+        resp = _response(status=401, text="<html>nope</html>")
+        resp.raise_for_status = MagicMock(side_effect=ClientError("unauthorized"))
+        session = _session(get_responses=(resp,))
+
+        client = MozillionClient(session)
+        with pytest.raises(MozillionAuthError, match="401"):
+            await client.async_fetch_sims(cookie_header="stale=1")
+
+    @pytest.mark.asyncio
+    async def test_login_form_in_the_body_is_a_bounce(self) -> None:
+        """The markup is the second signal, on whichever path asked."""
+        html = '<form action="/login-post"><input name="password"></form>'
+        session = _session(get_responses=(_response(text=html),))
+
+        client = MozillionClient(session)
+        with pytest.raises(MozillionAuthError, match="login page"):
+            await client.async_fetch_sims(cookie_header="stale=1")
+
+    @pytest.mark.asyncio
+    async def test_login_form_body_is_a_bounce_even_with_a_json_content_type(
+        self,
+    ) -> None:
+        """A JSON content type must not hide a login form."""
+        session = _session(
+            get_responses=(
+                _response(
+                    text='<form action="/login-post"><input name="password"></form>',
+                    content_type="application/json",
+                ),
+            )
+        )
+
+        client = MozillionClient(session)
+        with pytest.raises(MozillionAuthError, match="login page"):
+            await client.async_fetch_overspend(
+                order_detail_id="1234567", cookie_header="stale=1"
+            )
+
+    @pytest.mark.asyncio
+    async def test_html_content_type_with_a_json_body_is_a_bounce(self) -> None:
+        """The Content-Type alone is enough, and it is checked before parsing.
+
+        This is the case the old split got wrong: an HTML challenge whose body
+        happens to be JSON-parseable was fed to the JSON parser rather than
+        recognised as a bounced session.
+        """
+        body = '{"status": "success", "usedData": 1, "totalData": 2}'
+        resp = _response(
+            text=body,
+            content_type="text/html; charset=UTF-8",
+            json_data={"status": "success", "usedData": 1, "totalData": 2},
+        )
+        session = _session(get_responses=(resp,))
+
+        client = MozillionClient(session)
+        with pytest.raises(MozillionAuthError, match="instead of JSON"):
+            await client.async_get_usage(
+                order_detail_id="1234567",
+                sim_meta_id="7654321",
+                cookie_header="mozillion_session=abc",
+            )
+
+        # The body was never handed to the JSON parser.
+        resp.json.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_html_content_type_alone_is_not_a_bounce_on_the_dashboard(
+        self,
+    ) -> None:
+        """text/html is the dashboard's normal answer on a healthy session."""
+        session = _session(get_responses=(_response(text=DASHBOARD_HTML),))
+
+        client = MozillionClient(session)
+        sims = await client.async_fetch_sims(cookie_header="mozillion_session=abc")
+
+        assert [sim.sim_meta_id for sim in sims] == ["7654321"]
+
+    @pytest.mark.asyncio
+    async def test_an_unreadable_dashboard_stays_a_runtime_error(self) -> None:
+        """Changed markup, or an account with no SIMs: not an auth problem."""
+        session = _session(
+            get_responses=(_response(text="<html><body>maintenance</body></html>"),)
+        )
+
+        client = MozillionClient(session)
+        with pytest.raises(RuntimeError, match="No SIMs found") as err:
+            await client.async_fetch_sims(cookie_header="mozillion_session=abc")
+
+        assert not isinstance(err.value, MozillionAuthError)
 
 
 # ---------------------------------------------------------------------------
