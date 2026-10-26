@@ -142,17 +142,30 @@ async def test_device_carries_the_plan_as_its_model(hass: HomeAssistant) -> None
     assert (DOMAIN, "7654321") in devices[0].identifiers
 
 
-async def test_entities_carry_the_raw_payload(hass: HomeAssistant) -> None:
+async def test_the_usage_sensor_carries_the_sim_detail(hass: HomeAssistant) -> None:
+    """The detail is published once per SIM, on the usage sensor.
+
+    The whole ``/get-data-usage`` payload used to be an attribute of all nine
+    sensors. It is gone: every field of it has an entity or a key of its own, and
+    ``diagnostics.py`` ships the response for bug reports.
+    """
+
     entry = _entry(hass)
 
     with patch(CLIENT, return_value=_client()):
         await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    state = _sensor_ending(hass, "_usage")
-    assert state.attributes["raw"] == MOCK_API_RESPONSE
-    assert state.attributes["usage_gbr"] == 3.5
-    assert state.attributes["total_global"] == 0.0
+    usage = _sensor_ending(hass, "_usage")
+    assert "raw" not in usage.attributes
+    assert usage.attributes["usage_gbr"] == 3.5
+    assert usage.attributes["total_global"] == 0.0
+    # None of the other sensors on the device repeats it.
+    for state in hass.states.async_all():
+        if state.entity_id == usage.entity_id:
+            continue
+        assert "raw" not in state.attributes, state.entity_id
+        assert "usage_gbr" not in state.attributes, state.entity_id
 
 
 async def test_unload_removes_the_entities(hass: HomeAssistant) -> None:
@@ -383,13 +396,17 @@ async def test_the_port_status_and_plan_details_are_exposed(
     port = _sensor_ending(hass, "_number_port_status")
     assert port.state == "Done"
 
+    # The detail belongs to the SIM, so it rides on the usage sensor alone.
+    detail = _sensor_ending(hass, "_usage").attributes
+    assert detail[ATTR_PORT_STATUS] == "DONE"
+    assert detail[ATTR_PORT_DATE] == "29-12-2025"
+    assert detail[ATTR_PLAN_VOICEMAIL] is True
+    assert detail[ATTR_PLAN_PARENTAL_CONTROL] is False
+    assert detail[ATTR_BILLING_AMOUNT] == 999.0
+    assert detail[ATTR_HAS_BILL] is False
+
     status = _sensor_ending(hass, "_sim_status")
-    assert status.attributes[ATTR_PORT_STATUS] == "DONE"
-    assert status.attributes[ATTR_PORT_DATE] == "29-12-2025"
-    assert status.attributes[ATTR_PLAN_VOICEMAIL] is True
-    assert status.attributes[ATTR_PLAN_PARENTAL_CONTROL] is False
-    assert status.attributes[ATTR_BILLING_AMOUNT] == 999.0
-    assert status.attributes[ATTR_HAS_BILL] is False
+    assert ATTR_PLAN_VOICEMAIL not in status.attributes
 
 
 async def test_setup_gives_the_client_its_own_session(hass: HomeAssistant) -> None:

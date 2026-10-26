@@ -24,6 +24,7 @@ from custom_components.mozillion.const import (
     ATTR_SIM_NUMBER,
     ATTR_SIM_STATUS,
     ATTR_TOTAL,
+    ATTR_UNLIMITED,
     ATTR_USAGE,
     ATTR_USAGE_PERCENTAGE,
     ATTR_WALLET,
@@ -313,14 +314,73 @@ class TestMozillionSensorEntity:
         sensor = _sensor_for(ATTR_REMAINING, data=MOCK_COORDINATOR_DATA_UNLIMITED)
         assert sensor.native_value is None
 
-    def test_extra_state_attributes(self) -> None:
+    def test_usage_sensor_carries_the_sim_detail(self) -> None:
         attrs = _sensor().extra_state_attributes
-        assert attrs[ATTR_RAW] == MOCK_COORDINATOR_DATA[ATTR_RAW]
         assert attrs["usage_gbr"] == 3.5
         assert attrs["total_global"] == 0.0
         assert attrs["reset_label"] == "19 Oct"
-        assert attrs["plan_tariff"] == "10GB"
-        assert attrs[ATTR_WALLET] == MOCK_COORDINATOR_DATA[ATTR_WALLET]
+        assert attrs[ATTR_PLAN_TARIFF] == "10GB"
+        assert attrs[ATTR_PORT_STATUS] == "DONE"
+        assert attrs["billing_amount"] == 999.0
+
+    def test_the_detail_is_not_repeated_on_the_other_sensors(self) -> None:
+        """One SIM, one copy: the detail describes the SIM, not the reading."""
+
+        for description in DATA_SENSORS:
+            if description.key == ATTR_USAGE:
+                continue
+            assert _sensor(description=description).extra_state_attributes == {}, (
+                description.key
+            )
+
+
+class TestAttributesAreNotRepeated:
+    """Every attribute belongs to exactly one entity of the SIM's device.
+
+    The same 22-key dict used to be built for all nine sensors (and the wallet on
+    ten entities), which recorded every value ten times per poll and filled the
+    attribute panel with copies. These are the regression guards for that.
+    """
+
+    def _attributes_by_entity(self) -> dict[str, dict[str, Any]]:
+        entities: dict[str, Any] = {
+            description.key: _sensor(description=description)
+            for description in DATA_SENSORS
+        }
+        entities[ATTR_UNLIMITED] = _unlimited_sensor()
+        entities[ATTR_OVERSPEND_LIMIT_REACHED] = _overspend_sensor()
+        return {
+            name: entity.extra_state_attributes or {}
+            for name, entity in entities.items()
+        }
+
+    def test_each_attribute_is_published_once(self) -> None:
+        seen: dict[str, str] = {}
+        for name, attrs in self._attributes_by_entity().items():
+            for key in attrs:
+                assert key not in seen, f"{key} on both {seen[key]} and {name}"
+                seen[key] = name
+
+    def test_the_detail_lives_on_the_usage_sensor(self) -> None:
+        by_entity = self._attributes_by_entity()
+        assert ATTR_PLAN_TARIFF in by_entity[ATTR_USAGE]
+        assert by_entity[ATTR_TOTAL] == {}
+
+    def test_the_raw_payload_is_not_an_attribute(self) -> None:
+        """diagnostics.py ships the payload; every field of it has its own key."""
+
+        for attrs in self._attributes_by_entity().values():
+            assert ATTR_RAW not in attrs
+
+    def test_only_the_overspend_sensor_carries_the_wallet(self) -> None:
+        by_entity = self._attributes_by_entity()
+        assert (
+            by_entity[ATTR_OVERSPEND_LIMIT_REACHED][ATTR_WALLET]
+            == (MOCK_COORDINATOR_DATA[ATTR_WALLET])
+        )
+        assert [name for name, attrs in by_entity.items() if ATTR_WALLET in attrs] == [
+            ATTR_OVERSPEND_LIMIT_REACHED
+        ]
 
 
 class TestIdentifierAttributesAreRedacted:
@@ -348,7 +408,8 @@ class TestIdentifierAttributesAreRedacted:
 
     def test_neither_binary_sensor_exposes_the_identifiers(self) -> None:
         for cls in (MozillionUnlimitedSensor, MozillionOverspendSensor):
-            attrs = _binary_sensor(cls).extra_state_attributes
+            # A sensor with nothing to say reports no attributes at all.
+            attrs = _binary_sensor(cls).extra_state_attributes or {}
             assert ATTR_SIM_NUMBER not in attrs, cls.__name__
             assert ATTR_ICCID not in attrs, cls.__name__
             assert "07700900000" not in repr(attrs), cls.__name__
@@ -415,10 +476,10 @@ class TestUnlimitedBinarySensor:
     def test_is_on_false_when_flag_missing(self) -> None:
         assert _unlimited_sensor(data={}).is_on is False
 
-    def test_extra_state_attributes(self) -> None:
-        attrs = _unlimited_sensor().extra_state_attributes
-        assert attrs[ATTR_USAGE] == 3.5
-        assert attrs[ATTR_USAGE_PERCENTAGE] == 35.0
+    def test_carries_no_extra_attributes(self) -> None:
+        """Usage and percentage are states of their own entities on this device."""
+
+        assert not _unlimited_sensor().extra_state_attributes
 
 
 class TestOverspendBinarySensor:

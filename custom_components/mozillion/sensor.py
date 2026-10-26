@@ -34,7 +34,6 @@ from .const import (
     ATTR_PORT_STATUS,
     ATTR_PORT_STATUS_DESCRIPTION,
     ATTR_PORT_STATUS_LABEL,
-    ATTR_RAW,
     ATTR_REMAINING,
     ATTR_RESET_DATE,
     ATTR_RESET_LABEL,
@@ -47,7 +46,6 @@ from .const import (
     ATTR_USAGE_GBR,
     ATTR_USAGE_GLOBAL,
     ATTR_USAGE_PERCENTAGE,
-    ATTR_WALLET,
     ATTR_WALLET_BALANCE,
     ATTR_WALLET_SPEND,
     SUBENTRY_TYPE_SIM,
@@ -218,33 +216,55 @@ class MozillionSensor(MozillionEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the raw payloads plus the derived detail."""
+        """Return the per-SIM detail, on the usage sensor only.
 
-        data = self.coordinator.data
-        return {
-            ATTR_RAW: data.get(ATTR_RAW),
-            ATTR_UNLIMITED: data.get(ATTR_UNLIMITED),
-            ATTR_USAGE_GBR: data.get(ATTR_USAGE_GBR),
-            ATTR_TOTAL_GBR: data.get(ATTR_TOTAL_GBR),
-            ATTR_USAGE_GLOBAL: data.get(ATTR_USAGE_GLOBAL),
-            ATTR_TOTAL_GLOBAL: data.get(ATTR_TOTAL_GLOBAL),
-            ATTR_RESET_LABEL: data.get(ATTR_RESET_LABEL),
-            ATTR_DAYS_LEFT: data.get(ATTR_DAYS_LEFT),
-            ATTR_PLAN_TARIFF: data.get(ATTR_PLAN_TARIFF),
-            ATTR_PLAN_DURATION: data.get(ATTR_PLAN_DURATION),
-            ATTR_PLAN_ROAMING: data.get(ATTR_PLAN_ROAMING),
-            ATTR_PLAN_TEXTS: data.get(ATTR_PLAN_TEXTS),
-            ATTR_PLAN_IS_DATA_ONLY: data.get(ATTR_PLAN_IS_DATA_ONLY),
-            ATTR_PLAN_VOICEMAIL: data.get(ATTR_PLAN_VOICEMAIL),
-            ATTR_PLAN_PARENTAL_CONTROL: data.get(ATTR_PLAN_PARENTAL_CONTROL),
-            ATTR_PORT_STATUS: data.get(ATTR_PORT_STATUS),
-            ATTR_PORT_STATUS_DESCRIPTION: data.get(ATTR_PORT_STATUS_DESCRIPTION),
-            ATTR_PORT_DATE: data.get(ATTR_PORT_DATE),
-            # Raw, with no unit claimed: the page states neither a currency nor
-            # whether this is pence, and only says "Paid in full / No upcoming
-            # bill" beside it.
-            ATTR_BILLING_AMOUNT: data.get(ATTR_BILLING_AMOUNT),
-            ATTR_HAS_BILL: data.get(ATTR_HAS_BILL),
-            ATTR_BILLING_DAYS: data.get(ATTR_BILLING_DAYS),
-            ATTR_WALLET: data.get(ATTR_WALLET),
-        }
+        Nine sensors share one device, and this detail describes the SIM rather
+        than any single reading. Repeating it on every sensor wrote the same
+        values into the recorder nine times per poll and buried the one sensor a
+        user actually looks at, so it lives on the usage sensor alone.
+        """
+
+        if self.entity_description.key != ATTR_USAGE:
+            return {}
+        return _sim_detail(self.coordinator.data)
+
+
+def _sim_detail(data: dict[str, Any]) -> dict[str, Any]:
+    """Return what the dashboard publishes that has no entity of its own.
+
+    The per-bucket figures, the plan, the porting detail, the billing fields and
+    the reset wording are all attributes because none of them has been pinned to
+    a meaning worth an entity (see the notes at the top of this module). They are
+    exposed once per SIM, on the usage sensor.
+
+    The usage payload itself is deliberately absent: every field in it is either
+    an entity state (``usage``, ``total``, ``remaining``, ``usage_percentage``,
+    ``unlimited``) or a key below, and ``diagnostics.py`` ships the whole response
+    for bug reports.
+    """
+
+    return {
+        ATTR_UNLIMITED: data.get(ATTR_UNLIMITED),
+        ATTR_USAGE_GBR: data.get(ATTR_USAGE_GBR),
+        ATTR_TOTAL_GBR: data.get(ATTR_TOTAL_GBR),
+        ATTR_USAGE_GLOBAL: data.get(ATTR_USAGE_GLOBAL),
+        ATTR_TOTAL_GLOBAL: data.get(ATTR_TOTAL_GLOBAL),
+        ATTR_RESET_LABEL: data.get(ATTR_RESET_LABEL),
+        ATTR_DAYS_LEFT: data.get(ATTR_DAYS_LEFT),
+        ATTR_PLAN_TARIFF: data.get(ATTR_PLAN_TARIFF),
+        ATTR_PLAN_DURATION: data.get(ATTR_PLAN_DURATION),
+        ATTR_PLAN_ROAMING: data.get(ATTR_PLAN_ROAMING),
+        ATTR_PLAN_TEXTS: data.get(ATTR_PLAN_TEXTS),
+        ATTR_PLAN_IS_DATA_ONLY: data.get(ATTR_PLAN_IS_DATA_ONLY),
+        ATTR_PLAN_VOICEMAIL: data.get(ATTR_PLAN_VOICEMAIL),
+        ATTR_PLAN_PARENTAL_CONTROL: data.get(ATTR_PLAN_PARENTAL_CONTROL),
+        ATTR_PORT_STATUS: data.get(ATTR_PORT_STATUS),
+        ATTR_PORT_STATUS_DESCRIPTION: data.get(ATTR_PORT_STATUS_DESCRIPTION),
+        ATTR_PORT_DATE: data.get(ATTR_PORT_DATE),
+        # Raw, with no unit claimed: the page states neither a currency nor
+        # whether this is pence, and only says "Paid in full / No upcoming
+        # bill" beside it.
+        ATTR_BILLING_AMOUNT: data.get(ATTR_BILLING_AMOUNT),
+        ATTR_HAS_BILL: data.get(ATTR_HAS_BILL),
+        ATTR_BILLING_DAYS: data.get(ATTR_BILLING_DAYS),
+    }
