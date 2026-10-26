@@ -7,11 +7,13 @@ page, which is what lets one set of credentials cover every SIM.
 
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import logging
 from collections.abc import Mapping
+from types import ModuleType
 from typing import Any
 
-import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import (
     ConfigEntry,
@@ -43,6 +45,13 @@ from .const import (
     SUBENTRY_TYPE_SIM,
 )
 from .session import has_credentials
+
+# Home Assistant 2026.10 replaced voluptuous with probatio for flow schemas.
+# hacs.json still declares 2026.6 as the minimum, so pick whichever the running
+# core provides rather than requiring the newest release.
+schema: ModuleType = importlib.import_module(
+    "probatio" if importlib.util.find_spec("probatio") else "voluptuous"
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -81,25 +90,25 @@ def _credentials_schema(defaults: Mapping[str, Any] | None = None) -> dict[Any, 
         return str(defaults.get(key) or "")
 
     return {
-        vol.Optional(CONF_EMAIL, default=default(CONF_EMAIL)): selector.TextSelector(
+        schema.Optional(CONF_EMAIL, default=default(CONF_EMAIL)): selector.TextSelector(
             selector.TextSelectorConfig(type=selector.TextSelectorType.EMAIL)
         ),
-        vol.Optional(CONF_PASSWORD, default=""): selector.TextSelector(
+        schema.Optional(CONF_PASSWORD, default=""): selector.TextSelector(
             selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
         ),
-        vol.Optional(
+        schema.Optional(
             CONF_TOTP_SECRET, default=default(CONF_TOTP_SECRET)
         ): selector.TextSelector(
             selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
         ),
-        vol.Optional(
+        schema.Optional(
             CONF_ORIGIN,
             default=default(CONF_ORIGIN) or DEFAULT_ORIGIN,
             description={"advanced": True},
         ): selector.TextSelector(
             selector.TextSelectorConfig(type=selector.TextSelectorType.URL)
         ),
-        vol.Optional(
+        schema.Optional(
             CONF_SESSION_COOKIE,
             default="",
             description={"advanced": True},
@@ -108,7 +117,7 @@ def _credentials_schema(defaults: Mapping[str, Any] | None = None) -> dict[Any, 
                 type=selector.TextSelectorType.TEXT, multiline=True
             )
         ),
-        vol.Optional(
+        schema.Optional(
             CONF_XSRF_TOKEN,
             default="",
             description={"advanced": True},
@@ -314,10 +323,10 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema(
+            data_schema=schema.Schema(
                 {
                     **_credentials_schema(),
-                    vol.Optional(
+                    schema.Optional(
                         CONF_SCAN_INTERVAL,
                         default=DEFAULT_SCAN_INTERVAL,
                         description={"advanced": True},
@@ -356,7 +365,9 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="select_sim",
-            data_schema=vol.Schema({vol.Required("sim"): vol.In(list(choices))}),
+            data_schema=schema.Schema(
+                {schema.Required("sim"): schema.In(list(choices))}
+            ),
             errors=errors,
         )
 
@@ -384,11 +395,11 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="manual_ids",
-            data_schema=vol.Schema(
+            data_schema=schema.Schema(
                 {
-                    vol.Required(CONF_ORDER_DETAIL_ID): str,
-                    vol.Required(CONF_SIM_META_ID): str,
-                    vol.Optional(CONF_SIM_NUMBER, default=""): str,
+                    schema.Required(CONF_ORDER_DETAIL_ID): str,
+                    schema.Required(CONF_SIM_META_ID): str,
+                    schema.Optional(CONF_SIM_NUMBER, default=""): str,
                 }
             ),
             errors=errors,
@@ -500,7 +511,7 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="reauth_confirm",
-            data_schema=vol.Schema(_credentials_schema(existing.data)),
+            data_schema=schema.Schema(_credentials_schema(existing.data)),
             errors=errors,
         )
 
@@ -561,7 +572,7 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="reconfigure_confirm",
-            data_schema=vol.Schema(_credentials_schema(entry.data)),
+            data_schema=schema.Schema(_credentials_schema(entry.data)),
             errors=errors,
         )
 
@@ -670,11 +681,11 @@ class SimSubentryFlowHandler(ConfigSubentryFlow):
 
         return self.async_show_form(
             step_id="manual_ids",
-            data_schema=vol.Schema(
+            data_schema=schema.Schema(
                 {
-                    vol.Required(CONF_ORDER_DETAIL_ID): str,
-                    vol.Required(CONF_SIM_META_ID): str,
-                    vol.Optional(CONF_SIM_NUMBER, default=""): str,
+                    schema.Required(CONF_ORDER_DETAIL_ID): str,
+                    schema.Required(CONF_SIM_META_ID): str,
+                    schema.Optional(CONF_SIM_NUMBER, default=""): str,
                 }
             ),
             errors=errors,
@@ -735,7 +746,9 @@ class SimSubentryFlowHandler(ConfigSubentryFlow):
         # flow with "ValueError: Source is reconfigure, expected user".
         return self.async_show_form(
             step_id="reconfigure" if reconfigure else "user",
-            data_schema=vol.Schema({vol.Required("sim"): vol.In(list(choices))}),
+            data_schema=schema.Schema(
+                {schema.Required("sim"): schema.In(list(choices))}
+            ),
             errors=errors,
         )
 
@@ -802,7 +815,7 @@ class MozillionOptionsFlowHandler(config_entries.OptionsFlow):
 
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(
+            data_schema=schema.Schema(
                 {
                     # Same floor as the setup form's NumberSelector: below a minute
                     # the poller exhausts Mozillion's request budget and every poll
@@ -810,8 +823,8 @@ class MozillionOptionsFlowHandler(config_entries.OptionsFlow):
                     # so a sub-minute value is refused before it can be saved --
                     # Home Assistant answers the dialog with this field's error and
                     # keeps the flow open instead of storing it.
-                    vol.Optional(CONF_SCAN_INTERVAL, default=current): vol.All(
-                        vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)
+                    schema.Optional(CONF_SCAN_INTERVAL, default=current): schema.All(
+                        schema.Coerce(int), schema.Range(min=MIN_SCAN_INTERVAL)
                     )
                 }
             ),

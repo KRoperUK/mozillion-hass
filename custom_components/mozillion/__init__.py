@@ -16,13 +16,12 @@ from datetime import timedelta
 from types import MappingProxyType
 from typing import Any
 
-from homeassistant.components.binary_sensor import DOMAIN as BINARY_SENSOR_DOMAIN
-from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.config_entries import (
     SOURCE_RECONFIGURE,
     ConfigEntry,
     ConfigSubentry,
 )
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import entity_registry as er
@@ -53,7 +52,7 @@ _LOGGER = logging.getLogger(__name__)
 
 CONFIG_ENTRY_VERSION = 3
 
-PLATFORMS = [SENSOR_DOMAIN, BINARY_SENSOR_DOMAIN]
+PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
 # Keys that existed before the dashboard moved to the sim_meta_id contract.
 _LEGACY_KEYS = ("sim_plan_id", "usage_key", "remaining_key")
