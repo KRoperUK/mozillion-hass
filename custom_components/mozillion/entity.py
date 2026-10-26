@@ -6,6 +6,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .api import mask_identifier
 from .const import (
     ATTR_PLAN_TARIFF,
     CONF_ICCID,
@@ -14,6 +15,20 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import MozillionCoordinator
+
+
+def _device_label(sim_number: str, plan_tariff: str | None) -> str:
+    """Return what the device is named after, without the phone number.
+
+    The name reaches every entity's ``friendly_name`` and every entity id on a
+    fresh install, so it must not carry the number in full. The plan tariff says
+    more to a user than a number does; the masked number is the fallback until the
+    dashboard has been read, and users can rename the device if they want to.
+    """
+
+    if plan_tariff:
+        return plan_tariff
+    return mask_identifier(sim_number)
 
 
 def sim_device_info(
@@ -32,12 +47,13 @@ def sim_device_info(
 
     sim_number = subentry.data.get(CONF_SIM_NUMBER, "")
     iccid = subentry.data.get(CONF_ICCID, "")
+    label = _device_label(sim_number, plan_tariff)
 
     info = DeviceInfo(
         identifiers={
             (DOMAIN, subentry.data.get(CONF_SIM_META_ID) or subentry.subentry_id)
         },
-        name=f"Mozillion {sim_number}" if sim_number else "Mozillion",
+        name=f"Mozillion {label}" if label else "Mozillion",
         manufacturer="Mozillion",
         suggested_area="Network",
     )
