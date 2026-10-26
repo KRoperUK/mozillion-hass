@@ -28,6 +28,7 @@ from homeassistant.config_entries import ConfigEntryState, ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from tests.conftest import (
@@ -51,6 +52,8 @@ SECOND_SIM = dataclasses.replace(
     iccid="89440000000000000001",
     label="Second SIM",
 )
+
+ALL_SIMS = (MOCK_SIM, SECOND_SIM)
 
 
 @pytest.fixture(autouse=True)
@@ -372,13 +375,22 @@ async def test_adding_a_sim_produces_its_entities(hass: HomeAssistant) -> None:
         devices = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
 
     added = _entity_ids(hass) - before
+    every_entity = _entity_ids(hass)
 
     assert added, "adding a SIM must create its entities, not just a subentry"
-    # Entity ids carry the device name, which carries the SIM's number.
-    assert any(SECOND_SIM.sim_number in entity_id for entity_id in added), sorted(added)
+    # Entity ids carry the device name, which is the plan tariff rather than the
+    # SIM's phone number: no id on the instance may carry a number.
+    assert not any(
+        sim.sim_number in entity_id for entity_id in every_entity for sim in ALL_SIMS
+    ), sorted(every_entity)
     # The first SIM keeps its own entities, and each SIM gets its own device.
-    assert any(MOCK_SIM.sim_number in entity_id for entity_id in _entity_ids(hass))
+    assert any("mozillion_10gb" in entity_id for entity_id in every_entity), sorted(
+        every_entity
+    )
     assert len(devices) == 2, [device.name for device in devices]
+    assert {device.name for device in devices} == {
+        f"Mozillion {MOCK_SIM.plan_data_tariff}"
+    }, [device.name for device in devices]
 
 
 async def test_removing_a_sim_removes_its_entities(hass: HomeAssistant) -> None:
@@ -394,7 +406,6 @@ async def test_removing_a_sim_removes_its_entities(hass: HomeAssistant) -> None:
             result["flow_id"], {"sim": SECOND_SIM.display_name}
         )
         await hass.async_block_till_done()
-        assert any(SECOND_SIM.sim_number in e for e in _entity_ids(hass))
 
         second = next(
             subentry
@@ -408,7 +419,30 @@ async def test_removing_a_sim_removes_its_entities(hass: HomeAssistant) -> None:
 
         devices = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
 
-    remaining = _entity_ids(hass)
-    assert not any(SECOND_SIM.sim_number in entity_id for entity_id in remaining)
-    assert any(MOCK_SIM.sim_number in entity_id for entity_id in remaining)
+    # Both devices are named after the same plan, so the entity *ids* cannot tell
+    # them apart; the unique ids carry the subentry and therefore the SIM.
+    registry = er.async_get(hass)
+    remaining = er.async_entries_for_config_entry(registry, entry.entry_id)
+    first = next(
+        subentry
+        for subentry in _sim_subentries(entry)
+        if subentry.unique_id == MOCK_SIM.sim_meta_id
+    )
+
+    assert remaining, "the remaining SIM must keep its entities"
+    assert not [
+        entity
+        for entity in remaining
+        if entity.unique_id.startswith(f"{entry.entry_id}_{second.subentry_id}_")
+    ], [entity.entity_id for entity in remaining]
+    assert [
+        entity
+        for entity in remaining
+        if entity.unique_id.startswith(f"{entry.entry_id}_{first.subentry_id}_")
+    ]
+    assert not any(
+        sim.sim_number in entity_id
+        for entity_id in _entity_ids(hass)
+        for sim in ALL_SIMS
+    )
     assert len(devices) == 1, [device.name for device in devices]

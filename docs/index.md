@@ -103,15 +103,15 @@ automation:
   - alias: Mozillion data running low
     triggers:
       - trigger: numeric_state
-        entity_id: sensor.mozillion_07700900000_usage_percentage
+        entity_id: sensor.mozillion_10gb_usage_percentage
         above: 90
     actions:
       - action: notify.persistent_notification
         data:
           title: Mozillion data
           message: >
-            {{ states('sensor.mozillion_07700900000_remaining') }} GB left of
-            {{ states('sensor.mozillion_07700900000_total') }} GB.
+            {{ states('sensor.mozillion_10gb_remaining') }} GB left of
+            {{ states('sensor.mozillion_10gb_total') }} GB.
 ```
 
 Show the remaining allowance on a dashboard:
@@ -119,14 +119,15 @@ Show the remaining allowance on a dashboard:
 ```yaml
 type: entities
 entities:
-  - entity: sensor.mozillion_07700900000_usage
-  - entity: sensor.mozillion_07700900000_remaining
-  - entity: sensor.mozillion_07700900000_usage_percentage
-  - entity: binary_sensor.mozillion_07700900000_unlimited
+  - entity: sensor.mozillion_10gb_usage
+  - entity: sensor.mozillion_10gb_remaining
+  - entity: sensor.mozillion_10gb_usage_percentage
+  - entity: binary_sensor.mozillion_10gb_unlimited
 ```
 
-> Entity ids depend on the device name, which is the SIM's phone number. Check
-> *Settings → Devices & Services → Mozillion* for the exact ids.
+> Entity ids depend on the device name, which is the plan tariff (or the
+> masked SIM number until the plan is known). Check *Settings → Devices &
+> Services → Mozillion* for the exact ids.
 
 ### Blueprints
 

@@ -204,15 +204,19 @@ class TestCoordinatorUpdate:
         assert result[ATTR_UNLIMITED] is False
 
     @pytest.mark.asyncio
-    async def test_identity_fields_in_output(self) -> None:
-        """SIM number and ICCID come from the entry, not the payload."""
+    async def test_identity_fields_not_in_output(self) -> None:
+        """The phone number and ICCID stay out of the polled data.
+
+        Nothing reads them any more, and entity attributes are readable by every
+        user on the instance, recorded, and pasted into bug reports.
+        """
         client = _client()
         client.async_get_usage.return_value = MOCK_API_RESPONSE
         coordinator = _make_coordinator(client)
 
         result = await coordinator._async_update_data()
-        assert result[ATTR_SIM_NUMBER] == "07700900000"
-        assert result[ATTR_ICCID] == "89440000000000000000"
+        assert ATTR_SIM_NUMBER not in result
+        assert ATTR_ICCID not in result
 
     @pytest.mark.asyncio
     async def test_relogin_when_no_cookies(self) -> None:
