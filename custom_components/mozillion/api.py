@@ -472,7 +472,8 @@ def parse_sims(html: str) -> list[MozillionSim]:
         sim_meta_id = attrs.get("data-sim-id", "").strip()
         order_detail_id = attrs.get("data-orderdetail-id", "").strip()
         if not sim_meta_id or not order_detail_id:
-            _LOGGER.debug("Skipping sim-option without ids: %s", attrs)
+            # Only the names: the values carry the phone number and the ICCID.
+            _LOGGER.debug("Skipping sim-option without ids: %s", sorted(attrs))
             continue
 
         sims.append(

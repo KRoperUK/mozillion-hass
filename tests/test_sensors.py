@@ -15,11 +15,13 @@ from custom_components.mozillion.binary_sensor import (
 from custom_components.mozillion.const import (
     ATTR_ICCID,
     ATTR_OVERSPEND_LIMIT_REACHED,
+    ATTR_PLAN_TARIFF,
     ATTR_PORT_STATUS,
     ATTR_PORT_STATUS_LABEL,
     ATTR_RAW,
     ATTR_REMAINING,
     ATTR_RESET_DATE,
+    ATTR_SIM_NUMBER,
     ATTR_SIM_STATUS,
     ATTR_TOTAL,
     ATTR_USAGE,
@@ -246,13 +248,30 @@ class TestMozillionSensorEntity:
         assert (DOMAIN, "7654321") in _sensor().device_info["identifiers"]
 
     def test_device_info_without_sim_meta_id_falls_back_to_subentry_id(self) -> None:
-        sensor = _sensor(subentries=[_sim_subentry_data(sim_meta_id="", sim_number="")])
+        sensor = _sensor(
+            data={**MOCK_COORDINATOR_DATA, ATTR_PLAN_TARIFF: ""},
+            subentries=[_sim_subentry_data(sim_meta_id="", sim_number="")],
+        )
         info = sensor.device_info
         assert (DOMAIN, sensor._subentry.subentry_id) in info["identifiers"]
         assert info["name"] == "Mozillion"
 
-    def test_device_info_names_the_sim_number(self) -> None:
-        assert _sensor().device_info["name"] == "Mozillion 07700900000"
+    def test_device_info_does_not_name_the_sim_number(self) -> None:
+        """The name reaches every friendly_name, so the number must not be in it."""
+        name = _sensor().device_info["name"]
+        assert "07700900000" not in name
+        assert name == "Mozillion 10GB"
+
+    def test_device_info_prefers_the_plan_tariff_when_known(self) -> None:
+        data = {**MOCK_COORDINATOR_DATA, ATTR_PLAN_TARIFF: "250GB"}
+        assert _sensor(data=data).device_info["name"] == "Mozillion 250GB"
+
+    def test_device_info_falls_back_to_the_masked_sim_number(self) -> None:
+        """Before the plan is known the household still needs to tell SIMs apart."""
+        data = {**MOCK_COORDINATOR_DATA, ATTR_PLAN_TARIFF: ""}
+        name = _sensor(data=data).device_info["name"]
+        assert name == "Mozillion 077*****000"
+        assert "07700900000" not in name
 
     def test_device_info_serial_is_the_iccid(self) -> None:
         assert _sensor().device_info["serial_number"] == "89440000000000000000"
@@ -297,12 +316,43 @@ class TestMozillionSensorEntity:
     def test_extra_state_attributes(self) -> None:
         attrs = _sensor().extra_state_attributes
         assert attrs[ATTR_RAW] == MOCK_COORDINATOR_DATA[ATTR_RAW]
-        assert attrs[ATTR_ICCID] == "89440000000000000000"
         assert attrs["usage_gbr"] == 3.5
         assert attrs["total_global"] == 0.0
         assert attrs["reset_label"] == "19 Oct"
         assert attrs["plan_tariff"] == "10GB"
         assert attrs[ATTR_WALLET] == MOCK_COORDINATOR_DATA[ATTR_WALLET]
+
+
+class TestIdentifierAttributesAreRedacted:
+    """The phone number and ICCID must never reach an entity attribute.
+
+    Attributes are readable by every user on the instance, are written to the
+    recorder, and get pasted into forum posts and bug reports -- which is why
+    ``diagnostics.py`` redacts these same keys. Publishing them in the state
+    machine would undo that, so this class is the regression guard.
+    """
+
+    def test_no_reported_sensor_exposes_the_identifiers(self) -> None:
+        for description in DATA_SENSORS:
+            attrs = _sensor(description=description).extra_state_attributes
+            assert ATTR_SIM_NUMBER not in attrs, description.key
+            assert ATTR_ICCID not in attrs, description.key
+
+    def test_no_sensor_attribute_carries_the_values(self) -> None:
+        """Not just the keys: nothing may carry the number or ICCID as a value."""
+
+        for description in DATA_SENSORS:
+            rendered = repr(_sensor(description=description).extra_state_attributes)
+            assert "07700900000" not in rendered, description.key
+            assert "89440000000000000000" not in rendered, description.key
+
+    def test_neither_binary_sensor_exposes_the_identifiers(self) -> None:
+        for cls in (MozillionUnlimitedSensor, MozillionOverspendSensor):
+            attrs = _binary_sensor(cls).extra_state_attributes
+            assert ATTR_SIM_NUMBER not in attrs, cls.__name__
+            assert ATTR_ICCID not in attrs, cls.__name__
+            assert "07700900000" not in repr(attrs), cls.__name__
+            assert "89440000000000000000" not in repr(attrs), cls.__name__
 
 
 # ---------------------------------------------------------------------------

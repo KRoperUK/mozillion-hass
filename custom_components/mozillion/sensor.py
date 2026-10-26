@@ -23,7 +23,6 @@ from .const import (
     ATTR_BILLING_DAYS,
     ATTR_DAYS_LEFT,
     ATTR_HAS_BILL,
-    ATTR_ICCID,
     ATTR_PLAN_DURATION,
     ATTR_PLAN_IS_DATA_ONLY,
     ATTR_PLAN_PARENTAL_CONTROL,
@@ -39,7 +38,6 @@ from .const import (
     ATTR_REMAINING,
     ATTR_RESET_DATE,
     ATTR_RESET_LABEL,
-    ATTR_SIM_NUMBER,
     ATTR_SIM_STATUS,
     ATTR_TOTAL,
     ATTR_TOTAL_GBR,
@@ -225,8 +223,6 @@ class MozillionSensor(MozillionEntity, SensorEntity):
         data = self.coordinator.data
         return {
             ATTR_RAW: data.get(ATTR_RAW),
-            ATTR_SIM_NUMBER: data.get(ATTR_SIM_NUMBER),
-            ATTR_ICCID: data.get(ATTR_ICCID),
             ATTR_UNLIMITED: data.get(ATTR_UNLIMITED),
             ATTR_USAGE_GBR: data.get(ATTR_USAGE_GBR),
             ATTR_TOTAL_GBR: data.get(ATTR_TOTAL_GBR),

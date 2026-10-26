@@ -14,6 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .api import (
     MozillionAuthError,
@@ -27,7 +28,6 @@ from .const import (
     ATTR_BILLING_DAYS,
     ATTR_DAYS_LEFT,
     ATTR_HAS_BILL,
-    ATTR_ICCID,
     ATTR_OVERSPEND_LIMIT_REACHED,
     ATTR_PLAN_DURATION,
     ATTR_PLAN_IS_DATA_ONLY,
@@ -44,7 +44,6 @@ from .const import (
     ATTR_REMAINING,
     ATTR_RESET_DATE,
     ATTR_RESET_LABEL,
-    ATTR_SIM_NUMBER,
     ATTR_SIM_STATUS,
     ATTR_TOTAL,
     ATTR_TOTAL_GBR,
@@ -57,7 +56,6 @@ from .const import (
     ATTR_WALLET,
     ATTR_WALLET_BALANCE,
     ATTR_WALLET_SPEND,
-    CONF_ICCID,
     CONF_ORDER_DETAIL_ID,
     CONF_SESSION_COOKIE,
     CONF_SIM_META_ID,
@@ -355,8 +353,6 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             raise UpdateFailed(err) from err
 
         data = _build_coordinator_data(raw, sim=sim, wallet=wallet)
-        data[ATTR_SIM_NUMBER] = self.subentry.data.get(CONF_SIM_NUMBER, "")
-        data[ATTR_ICCID] = self.subentry.data.get(CONF_ICCID, "")
 
         _LOGGER.debug(
             "Update success for %s: usage=%s, total=%s, remaining=%s, "
@@ -472,7 +468,13 @@ def _build_coordinator_data(
         data[ATTR_SIM_STATUS] = sim.status
         data[ATTR_RESET_LABEL] = sim.reset_label
         data[ATTR_DAYS_LEFT] = sim.days_left
-        data[ATTR_RESET_DATE] = parse_reset_date(sim.reset_label, sim.days_left)
+        # Home Assistant's clock, not the process's: ``date.today()`` is the
+        # container's time zone, which is usually UTC while the user's Home
+        # Assistant is not, so between midnight and the UTC offset the reset
+        # date came out a day early.
+        data[ATTR_RESET_DATE] = parse_reset_date(
+            sim.reset_label, sim.days_left, today=dt_util.now().date()
+        )
         data[ATTR_PLAN_TARIFF] = sim.plan_data_tariff
         data[ATTR_PLAN_DURATION] = sim.plan_duration
         data[ATTR_PLAN_ROAMING] = sim.plan_roaming
