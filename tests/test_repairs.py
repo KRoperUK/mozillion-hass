@@ -21,8 +21,12 @@ from custom_components.mozillion.const import (
     DOMAIN,
     ISSUE_DASHBOARD_UNREADABLE,
     REPAIR_FAILURE_THRESHOLD,
+    SUBENTRY_TYPE_SIM,
 )
-from custom_components.mozillion.coordinator import MozillionCoordinator
+from custom_components.mozillion.coordinator import (
+    MozillionCoordinator,
+    MozillionDashboard,
+)
 from custom_components.mozillion.session import MozillionSession
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -34,6 +38,7 @@ from tests.conftest import (
     MOCK_SIM,
     MOCK_WALLET,
     _make_config_entry,
+    _sim_subentry_data,
     sim_subentry,
 )
 
@@ -134,20 +139,56 @@ def _coordinator(hass: HomeAssistant) -> tuple[MozillionCoordinator, AsyncMock]:
 
     client = AsyncMock()
     client.async_get_usage.return_value = MOCK_API_RESPONSE
-    client.async_fetch_sim.return_value = MOCK_SIM
+    client.async_fetch_sims.return_value = [MOCK_SIM]
     client.async_fetch_overspend.return_value = MOCK_WALLET
 
+    session = MozillionSession(cookie_header="mozillion_session=abc", xsrf_token="xyz")
     coordinator = MozillionCoordinator(
         hass=hass,
         client=client,
         entry=entry,
         subentry=sim_subentry(entry),
-        session=MozillionSession(
-            cookie_header="mozillion_session=abc", xsrf_token="xyz"
-        ),
+        session=session,
+        dashboard=MozillionDashboard(client=client, session=session),
         update_interval=None,
     )
     return coordinator, client
+
+
+def _account_coordinators(
+    hass: HomeAssistant, client: AsyncMock
+) -> list[MozillionCoordinator]:
+    """Both SIMs of one account, over the shared session and dashboard."""
+
+    entry = _make_config_entry(
+        data=MOCK_ENTRY_DATA_COOKIE,
+        subentries=[
+            _sim_subentry_data(),
+            _sim_subentry_data(
+                order_detail_id="1234568",
+                sim_meta_id="7654322",
+                sim_number="07700900001",
+                iccid="89440000000000000001",
+            ),
+        ],
+    )
+    entry.add_to_hass(hass)
+
+    session = MozillionSession(cookie_header="mozillion_session=abc", xsrf_token="xyz")
+    dashboard = MozillionDashboard(client=client, session=session)
+    return [
+        MozillionCoordinator(
+            hass=hass,
+            client=client,
+            entry=entry,
+            subentry=subentry,
+            session=session,
+            dashboard=dashboard,
+            update_interval=None,
+        )
+        for subentry in entry.subentries.values()
+        if subentry.subentry_type == SUBENTRY_TYPE_SIM
+    ]
 
 
 class TestDashboardRepair:
@@ -155,7 +196,7 @@ class TestDashboardRepair:
 
     async def test_no_repair_for_a_single_blip(self, hass: HomeAssistant) -> None:
         coordinator, client = _coordinator(hass)
-        client.async_fetch_sim.side_effect = RuntimeError("markup changed")
+        client.async_fetch_sims.side_effect = RuntimeError("markup changed")
 
         await coordinator._async_update_data()
 
@@ -165,7 +206,7 @@ class TestDashboardRepair:
         self, hass: HomeAssistant
     ) -> None:
         coordinator, client = _coordinator(hass)
-        client.async_fetch_sim.side_effect = RuntimeError("markup changed")
+        client.async_fetch_sims.side_effect = RuntimeError("markup changed")
 
         for _ in range(REPAIR_FAILURE_THRESHOLD):
             await coordinator._async_update_data()
@@ -183,7 +224,7 @@ class TestDashboardRepair:
     ) -> None:
         """The repair must not take data usage down with it."""
         coordinator, client = _coordinator(hass)
-        client.async_fetch_sim.side_effect = RuntimeError("markup changed")
+        client.async_fetch_sims.side_effect = RuntimeError("markup changed")
 
         for _ in range(REPAIR_FAILURE_THRESHOLD):
             result = await coordinator._async_update_data()
@@ -191,17 +232,50 @@ class TestDashboardRepair:
         assert result[ATTR_USAGE] == 3.5
         assert result[ATTR_SIM_STATUS] == ""
 
+    async def test_each_sim_on_the_account_counts_the_broken_page(
+        self, hass: HomeAssistant
+    ) -> None:
+        """One shared read failure is still a repair for every affected SIM.
+
+        The page is read once per account now, but each SIM's plan, status and
+        reset entities go without when it cannot be parsed, so each SIM counts its
+        own failure -- and the registry keys the issue on one id, so the account
+        gets one repair rather than one per SIM.
+        """
+
+        client = AsyncMock()
+        client.async_get_usage.return_value = MOCK_API_RESPONSE
+        client.async_fetch_sims.side_effect = RuntimeError("markup changed")
+        client.async_fetch_overspend.return_value = MOCK_WALLET
+        first, second = _account_coordinators(hass, client)
+
+        for _ in range(REPAIR_FAILURE_THRESHOLD):
+            await first._async_update_data()
+            await second._async_update_data()
+
+        assert first._dashboard_failures == REPAIR_FAILURE_THRESHOLD
+        assert second._dashboard_failures == REPAIR_FAILURE_THRESHOLD
+        # A failure is deliberately not cached, so each SIM retries rather than
+        # serving the other's cached error: two attempts per cycle, not one.
+        assert client.async_fetch_sims.await_count == 2 * REPAIR_FAILURE_THRESHOLD
+        # Both SIMs report the same id, so the user sees one repair.
+        assert [
+            key
+            for key in ir.async_get(hass).issues
+            if key[1] == ISSUE_DASHBOARD_UNREADABLE
+        ] == [(DOMAIN, ISSUE_DASHBOARD_UNREADABLE)]
+
     async def test_repair_clears_when_the_dashboard_recovers(
         self, hass: HomeAssistant
     ) -> None:
         coordinator, client = _coordinator(hass)
-        client.async_fetch_sim.side_effect = RuntimeError("markup changed")
+        client.async_fetch_sims.side_effect = RuntimeError("markup changed")
         for _ in range(REPAIR_FAILURE_THRESHOLD):
             await coordinator._async_update_data()
         assert _issue(hass) is not None
 
-        client.async_fetch_sim.side_effect = None
-        client.async_fetch_sim.return_value = MOCK_SIM
+        client.async_fetch_sims.side_effect = None
+        client.async_fetch_sims.return_value = [MOCK_SIM]
         result = await coordinator._async_update_data()
 
         assert _issue(hass) is None
@@ -213,7 +287,7 @@ class TestDashboardRepair:
     ) -> None:
         """An expired session needs reauth, not a 'markup changed' repair."""
         coordinator, client = _coordinator(hass)
-        client.async_fetch_sim.side_effect = MozillionAuthError("login page")
+        client.async_fetch_sims.side_effect = MozillionAuthError("login page")
 
         with pytest.raises(MozillionAuthError):
             await coordinator._async_read_dashboard()
@@ -229,7 +303,7 @@ class TestDashboardRepair:
         has to reach the repair just as changed markup does.
         """
         coordinator, client = _coordinator(hass)
-        client.async_fetch_sim.side_effect = RuntimeError(
+        client.async_fetch_sims.side_effect = RuntimeError(
             "Error fetching https://www.mozillion.com/new-user-dashboard: "
             "connection reset"
         )
@@ -244,7 +318,7 @@ class TestDashboardRepair:
     ) -> None:
         """Past the threshold each poll updates the same issue rather than stacking."""
         coordinator, client = _coordinator(hass)
-        client.async_fetch_sim.side_effect = RuntimeError("markup changed")
+        client.async_fetch_sims.side_effect = RuntimeError("markup changed")
 
         with patch(
             "custom_components.mozillion.coordinator.ir.async_create_issue"
@@ -307,14 +381,17 @@ def _real_client_coordinator(
 
     session.get = MagicMock(side_effect=_get)
 
+    client = MozillionClient(session)
+    shared_session = MozillionSession(
+        cookie_header="mozillion_session=abc", xsrf_token="xyz"
+    )
     return MozillionCoordinator(
         hass=hass,
-        client=MozillionClient(session),
+        client=client,
         entry=entry,
         subentry=sim_subentry(entry),
-        session=MozillionSession(
-            cookie_header="mozillion_session=abc", xsrf_token="xyz"
-        ),
+        session=shared_session,
+        dashboard=MozillionDashboard(client=client, session=shared_session),
         update_interval=None,
     )
 

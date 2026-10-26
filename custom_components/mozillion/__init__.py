@@ -3,7 +3,9 @@
 The config entry is the *account*: it holds the credentials and the session. Each SIM
 the account tracks is a subentry of type ``sim``, so adding a second SIM needs no
 second copy of your password, and changing it is done once. A separate coordinator
-polls each SIM, sharing one session through :class:`MozillionSession`.
+polls each SIM, sharing one session through :class:`MozillionSession` and one
+dashboard read through :class:`MozillionDashboard` -- the dashboard page lists every
+SIM on the account, so one download serves them all.
 """
 
 from __future__ import annotations
@@ -44,7 +46,7 @@ from .const import (
     DOMAIN,
     SUBENTRY_TYPE_SIM,
 )
-from .coordinator import CoordinatorData, MozillionCoordinator
+from .coordinator import CoordinatorData, MozillionCoordinator, MozillionDashboard
 from .session import MozillionSession
 
 _LOGGER = logging.getLogger(__name__)
@@ -85,6 +87,9 @@ class MozillionRuntimeData:
 
     client: MozillionClient
     session: MozillionSession
+    # One dashboard read for the whole account: the page lists every SIM, so the
+    # coordinators share it instead of each downloading it. See MozillionDashboard.
+    dashboard: MozillionDashboard
     coordinators: dict[str, MozillionCoordinator] = field(default_factory=dict)
     subentry_fingerprint: SubentryFingerprint = ()
     options_fingerprint: OptionsFingerprint = ()
@@ -98,6 +103,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: MozillionConfigEntry) ->
 
     session = MozillionSession.from_entry(entry)
     client = MozillionClient(async_create_clientsession(hass))
+    # One dashboard read for the account, exactly as one session covers its logins:
+    # the page carries every SIM, so the coordinators below share the parsed result
+    # rather than each downloading it once per refresh window.
+    dashboard = MozillionDashboard(client=client, session=session)
     update_interval = timedelta(
         seconds=entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     )
@@ -121,17 +130,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: MozillionConfigEntry) ->
             entry=entry,
             subentry=subentry,
             session=session,
+            dashboard=dashboard,
             update_interval=update_interval,
         )
         # Raises ConfigEntryAuthFailed / ConfigEntryNotReady on its own. The first
-        # SIM to poll logs in; the rest reuse the same session rather than logging
-        # in again.
+        # SIM to poll logs in and reads the dashboard; the rest reuse the same
+        # session and the same dashboard reading rather than repeating either.
         await coordinator.async_config_entry_first_refresh()
         coordinators[subentry.subentry_id] = coordinator
 
     entry.runtime_data = MozillionRuntimeData(
         client=client,
         session=session,
+        dashboard=dashboard,
         coordinators=coordinators,
         subentry_fingerprint=_subentry_fingerprint(entry),
         options_fingerprint=_options_fingerprint(entry),

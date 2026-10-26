@@ -271,6 +271,9 @@ async def test_manual_ids_create_the_subentry(hass: HomeAssistant) -> None:
     client.async_fetch_sims = AsyncMock(side_effect=_flaky)
 
     async with _account(hass, client) as entry:
+        # Setup reads the dashboard through this same call, so restart the count:
+        # the failure this test wants is the flow's own probe, not setup's read.
+        calls["n"] = 0
         result = await _start_flow(hass, entry)
         result = await hass.config_entries.subentries.async_configure(
             result["flow_id"],
