@@ -453,13 +453,15 @@ class TestAccountDetail:
     """The dashboard and wallet extras carried alongside usage."""
 
     @pytest.mark.asyncio
-    async def test_dashboard_detail_is_exposed(self) -> None:
+    async def test_dashboard_detail_is_exposed(self, frozen_today: date) -> None:
         coordinator = _make_coordinator(_client())
 
         result = await coordinator._async_update_data()
 
         assert result[ATTR_SIM_STATUS] == "ACTIVE"
         assert result[ATTR_RESET_LABEL] == "19 Oct"
+        # "19 Oct" rolls forward from the pinned 2026-09-21, never from the wall
+        # clock: the next 19th is 2026-10-19.
         assert result[ATTR_RESET_DATE] == date(2026, 10, 19)
         assert result[ATTR_PLAN_TARIFF] == "10GB"
         assert result[ATTR_PLAN_DURATION] == "24-Months"
