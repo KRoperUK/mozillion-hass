@@ -27,7 +27,6 @@ from .const import (
     ATTR_BILLING_DAYS,
     ATTR_DAYS_LEFT,
     ATTR_HAS_BILL,
-    ATTR_ICCID,
     ATTR_OVERSPEND_LIMIT_REACHED,
     ATTR_PLAN_DURATION,
     ATTR_PLAN_IS_DATA_ONLY,
@@ -44,7 +43,6 @@ from .const import (
     ATTR_REMAINING,
     ATTR_RESET_DATE,
     ATTR_RESET_LABEL,
-    ATTR_SIM_NUMBER,
     ATTR_SIM_STATUS,
     ATTR_TOTAL,
     ATTR_TOTAL_GBR,
@@ -57,7 +55,6 @@ from .const import (
     ATTR_WALLET,
     ATTR_WALLET_BALANCE,
     ATTR_WALLET_SPEND,
-    CONF_ICCID,
     CONF_ORDER_DETAIL_ID,
     CONF_SESSION_COOKIE,
     CONF_SIM_META_ID,
@@ -355,8 +352,6 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             raise UpdateFailed(err) from err
 
         data = _build_coordinator_data(raw, sim=sim, wallet=wallet)
-        data[ATTR_SIM_NUMBER] = self.subentry.data.get(CONF_SIM_NUMBER, "")
-        data[ATTR_ICCID] = self.subentry.data.get(CONF_ICCID, "")
 
         _LOGGER.debug(
             "Update success for %s: usage=%s, total=%s, remaining=%s, "

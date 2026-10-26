@@ -102,7 +102,9 @@ async def _async_authenticate(
     password = data.get(CONF_PASSWORD)
 
     if email and password:
-        _LOGGER.debug("Authenticating with credentials for %s", email)
+        # Deliberately no email, following api.py: a debug log gets pasted into
+        # public bug reports, and the account is already known from the entry.
+        _LOGGER.debug("Authenticating with the credentials on the entry")
         cookie_header, xsrf_token = await client.async_login(
             email=email,
             password=password,

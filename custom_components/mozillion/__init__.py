@@ -26,7 +26,7 @@ from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
-from .api import MozillionAuthError, MozillionClient, MozillionSim
+from .api import MozillionAuthError, MozillionClient, MozillionSim, mask_identifier
 from .const import (
     CONF_EMAIL,
     CONF_ICCID,
@@ -239,7 +239,7 @@ async def _async_migrate_to_v3(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.info(
         "Migrated Mozillion entry %s to an account with SIM %s",
         entry.entry_id,
-        sim_meta_id,
+        mask_identifier(sim_meta_id),
     )
     return True
 
@@ -354,11 +354,11 @@ async def _async_migrate_to_v2(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if sim is None:
         _LOGGER.error(
             "Cannot migrate Mozillion entry %s: none of the %d SIM(s) on the "
-            "dashboard match the stored SIM number %r. Reconfigure the "
+            "dashboard match the stored SIM number %s. Reconfigure the "
             "integration to pick the right SIM.",
             entry.entry_id,
             len(sims),
-            data.get(CONF_SIM_NUMBER, ""),
+            mask_identifier(data.get(CONF_SIM_NUMBER, "")),
         )
         await _async_prompt_reconfigure(hass, entry)
         return False
@@ -386,7 +386,9 @@ async def _async_migrate_to_v2(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         version=2,
     )
     _LOGGER.info(
-        "Migrated Mozillion entry %s to SIM %s", entry.entry_id, sim.sim_meta_id
+        "Migrated Mozillion entry %s to SIM %s",
+        entry.entry_id,
+        mask_identifier(sim.sim_meta_id),
     )
     return True
 
