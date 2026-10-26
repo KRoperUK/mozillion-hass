@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import time
-from datetime import date
-from types import MappingProxyType
+from dataclasses import replace
+from datetime import UTC, date, datetime
+from types import MappingProxyType, SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -12,6 +13,7 @@ import pytest
 from aiohttp import ClientError
 from custom_components.mozillion import MozillionAuthError, MozillionCoordinator
 from custom_components.mozillion.const import (
+    ATTR_DAYS_LEFT,
     ATTR_ICCID,
     ATTR_OVERSPEND_LIMIT_REACHED,
     ATTR_PLAN_DURATION,
@@ -468,6 +470,47 @@ class TestAccountDetail:
         assert result[ATTR_PLAN_ROAMING] == "EU roaming in 41 countries"
         assert result[ATTR_PLAN_TEXTS] == "Unlimited calls and texts"
         assert result[ATTR_PLAN_IS_DATA_ONLY] is False
+
+    @pytest.mark.asyncio
+    async def test_reset_date_uses_home_assistants_date_not_the_process_clock(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The reset date follows Home Assistant's time zone, not the container's.
+
+        In Docker the process is usually UTC while Home Assistant is configured
+        for a non-UTC zone, so for the first hours of a local day ``date.today()``
+        is still yesterday. Both clocks are pinned a day apart and the answer
+        must follow Home Assistant's, which is the one ahead.
+        """
+
+        process_today = date(2026, 9, 21)
+
+        class _ProcessDate(date):
+            @classmethod
+            def today(cls) -> date:
+                return process_today
+
+        # The fallback ``parse_reset_date`` would use on its own.
+        monkeypatch.setattr("custom_components.mozillion.api.date", _ProcessDate)
+        # Home Assistant's clock: already in the configured zone, so its date is
+        # the one the user is living in -- here 00:30 on the 22nd while the
+        # process is still on the 21st.
+        monkeypatch.setattr(
+            "custom_components.mozillion.coordinator.dt_util",
+            SimpleNamespace(now=lambda: datetime(2026, 9, 22, 0, 30, tzinfo=UTC)),
+            raising=False,
+        )
+
+        client = _client()
+        client.async_fetch_sim.return_value = replace(MOCK_SIM, days_left="19")
+
+        coordinator = _make_coordinator(client)
+
+        result = await coordinator._async_update_data()
+
+        assert result[ATTR_DAYS_LEFT] == "19"
+        # 2026-09-22 + 19 days. The process clock would have said 2026-10-10.
+        assert result[ATTR_RESET_DATE] == date(2026, 10, 11)
 
     @pytest.mark.asyncio
     async def test_wallet_detail_is_exposed(self) -> None:

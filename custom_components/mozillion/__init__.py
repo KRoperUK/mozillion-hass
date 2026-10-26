@@ -72,6 +72,13 @@ __all__ = [
 ]
 
 
+# What the loaded entry was built from. The credentials live on the entry itself
+# and the coordinator rewrites them whenever it logs in, so an entry-only change
+# says nothing about whether the entities are still right.
+type SubentryFingerprint = tuple[tuple[str, str, tuple[tuple[str, Any], ...]], ...]
+type OptionsFingerprint = tuple[tuple[str, Any], ...]
+
+
 @dataclass
 class MozillionRuntimeData:
     """Objects shared with the entity platforms."""
@@ -79,6 +86,8 @@ class MozillionRuntimeData:
     client: MozillionClient
     session: MozillionSession
     coordinators: dict[str, MozillionCoordinator] = field(default_factory=dict)
+    subentry_fingerprint: SubentryFingerprint = ()
+    options_fingerprint: OptionsFingerprint = ()
 
 
 type MozillionConfigEntry = ConfigEntry[MozillionRuntimeData]
@@ -121,7 +130,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: MozillionConfigEntry) ->
         coordinators[subentry.subentry_id] = coordinator
 
     entry.runtime_data = MozillionRuntimeData(
-        client=client, session=session, coordinators=coordinators
+        client=client,
+        session=session,
+        coordinators=coordinators,
+        subentry_fingerprint=_subentry_fingerprint(entry),
+        options_fingerprint=_options_fingerprint(entry),
     )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -130,9 +143,43 @@ async def async_setup_entry(hass: HomeAssistant, entry: MozillionConfigEntry) ->
     return True
 
 
-async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload when the account's subentries change."""
+def _subentry_fingerprint(entry: ConfigEntry) -> SubentryFingerprint:
+    """Summarise the SIM subentries the loaded entry was built from."""
 
+    return tuple(
+        (subentry.subentry_id, subentry.title, tuple(sorted(subentry.data.items())))
+        for subentry in entry.subentries.values()
+    )
+
+
+def _options_fingerprint(entry: ConfigEntry) -> OptionsFingerprint:
+    """Summarise the entry options the loaded entry was built from."""
+
+    return tuple(sorted(entry.options.items()))
+
+
+async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload when what the entry was set up from has actually changed.
+
+    Home Assistant fires this listener for *any* write to the entry, and the
+    coordinator writes the refreshed session cookie back every time it logs in --
+    twice a day at ``AUTH_REFRESH_THRESHOLD`` and again after a rejected cookie.
+    Reloading for that tore the entities down mid-poll, discarded the in-flight
+    update and started a second login, because the reloaded session begins with
+    ``authenticated_at=None``.
+
+    So a bare credentials write is ignored, while the changes that really do
+    alter the loaded result -- the SIM subentries and the options the coordinator
+    was configured with -- still reload.
+    """
+
+    runtime_data: MozillionRuntimeData | None = getattr(entry, "runtime_data", None)
+    if (
+        runtime_data is not None
+        and _subentry_fingerprint(entry) == runtime_data.subentry_fingerprint
+        and _options_fingerprint(entry) == runtime_data.options_fingerprint
+    ):
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 
