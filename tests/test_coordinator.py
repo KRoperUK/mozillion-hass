@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import replace
 from datetime import UTC, date, datetime
@@ -14,6 +15,7 @@ from aiohttp import ClientError
 from custom_components.mozillion import MozillionAuthError, MozillionCoordinator
 from custom_components.mozillion import api as api_module
 from custom_components.mozillion import coordinator as coordinator_module
+from custom_components.mozillion.api import MozillionSim
 from custom_components.mozillion.const import (
     ATTR_DAYS_LEFT,
     ATTR_ICCID,
@@ -50,7 +52,11 @@ from custom_components.mozillion.const import (
     REPAIR_FAILURE_THRESHOLD,
     SUBENTRY_TYPE_SIM,
 )
-from custom_components.mozillion.coordinator import _coordinator_label, wallet_is_active
+from custom_components.mozillion.coordinator import (
+    MozillionDashboard,
+    _coordinator_label,
+    wallet_is_active,
+)
 from custom_components.mozillion.session import MozillionSession
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -65,6 +71,7 @@ from tests.conftest import (
     MOCK_SIM_SUBENTRY_DATA,
     MOCK_WALLET,
     _make_config_entry,
+    _sim_subentry_data,
     sim_subentry,
 )
 
@@ -74,9 +81,36 @@ def _client() -> AsyncMock:
 
     client = AsyncMock()
     client.async_get_usage.return_value = MOCK_API_RESPONSE
-    client.async_fetch_sim.return_value = MOCK_SIM
+    # The dashboard read returns every SIM on the account, as the real client does.
+    client.async_fetch_sims.return_value = [MOCK_SIM]
     client.async_fetch_overspend.return_value = MOCK_WALLET
     return client
+
+
+def _coordinator_for_subentry(
+    client: AsyncMock,
+    entry: Any,
+    subentry: Any,
+    session: MozillionSession,
+    dashboard: MozillionDashboard,
+) -> MozillionCoordinator:
+    """Build a coordinator for one SIM over the account's shared objects."""
+
+    hass = MagicMock()
+    hass.config_entries = MagicMock()
+    hass.config_entries.async_update_entry = AsyncMock()
+    # A real dict, because the repair path reaches the issue registry via hass.data.
+    hass.data = {}
+
+    coordinator = MozillionCoordinator.__new__(MozillionCoordinator)
+    coordinator.client = client
+    coordinator.config_entry = entry
+    coordinator.subentry = subentry
+    coordinator.session = session
+    coordinator.dashboard = dashboard
+    coordinator._reset_poll_state()
+    coordinator.hass = hass
+    return coordinator
 
 
 def _make_coordinator(
@@ -99,20 +133,61 @@ def _make_coordinator_for_entry(
 ) -> MozillionCoordinator:
     """Create a coordinator for a specific (mocked) config entry."""
 
-    hass = MagicMock()
-    hass.config_entries = MagicMock()
-    hass.config_entries.async_update_entry = AsyncMock()
-    # A real dict, because the repair path reaches the issue registry via hass.data.
-    hass.data = {}
+    session = MozillionSession(cookie_header=cookie, xsrf_token=xsrf)
+    return _coordinator_for_subentry(
+        client,
+        entry,
+        sim_subentry(entry),
+        session,
+        MozillionDashboard(client=client, session=session),
+    )
 
-    coordinator = MozillionCoordinator.__new__(MozillionCoordinator)
-    coordinator.client = client
-    coordinator.config_entry = entry
-    coordinator.subentry = sim_subentry(entry)
-    coordinator.session = MozillionSession(cookie_header=cookie, xsrf_token=xsrf)
-    coordinator._reset_poll_state()
-    coordinator.hass = hass
-    return coordinator
+
+# A second SIM on the same account, told apart by the fields the tests read.
+OTHER_SIM = replace(
+    MOCK_SIM,
+    sim_meta_id="7654322",
+    order_detail_id="1234568",
+    sim_number="07700900001",
+    iccid="89440000000000000001",
+    status="SUSPENDED",
+    plan_data_tariff="20GB",
+)
+
+
+def _two_sim_coordinators(
+    client: AsyncMock,
+) -> tuple[MozillionCoordinator, MozillionCoordinator]:
+    """Two SIMs on one account, sharing one session and one dashboard read."""
+
+    entry = _make_config_entry(
+        data=MOCK_ENTRY_DATA_COOKIE,
+        subentries=[
+            _sim_subentry_data(),
+            _sim_subentry_data(
+                order_detail_id=OTHER_SIM.order_detail_id,
+                sim_meta_id=OTHER_SIM.sim_meta_id,
+                sim_number=OTHER_SIM.sim_number,
+                iccid=OTHER_SIM.iccid,
+            ),
+        ],
+    )
+    subentries = {
+        str(subentry.data[CONF_SIM_META_ID]): subentry
+        for subentry in entry.subentries.values()
+        if subentry.subentry_type == SUBENTRY_TYPE_SIM
+    }
+    session = MozillionSession(cookie_header="cookie=abc", xsrf_token="xsrf-tok")
+    # One holder for the account, built the way async_setup_entry builds it.
+    dashboard = MozillionDashboard(client=client, session=session)
+    return (
+        _coordinator_for_subentry(
+            client, entry, subentries[MOCK_SIM.sim_meta_id], session, dashboard
+        ),
+        _coordinator_for_subentry(
+            client, entry, subentries[OTHER_SIM.sim_meta_id], session, dashboard
+        ),
+    )
 
 
 class TestCoordinatorUpdate:
@@ -531,7 +606,7 @@ class TestAccountDetail:
         )
 
         client = _client()
-        client.async_fetch_sim.return_value = replace(MOCK_SIM, days_left="19")
+        client.async_fetch_sims.return_value = [replace(MOCK_SIM, days_left="19")]
 
         coordinator = _make_coordinator(client)
 
@@ -556,7 +631,7 @@ class TestAccountDetail:
     async def test_missing_extras_leave_usage_intact(self) -> None:
         """The extras come from fragile HTML; usage must survive without them."""
         client = _client()
-        client.async_fetch_sim.side_effect = RuntimeError("markup changed")
+        client.async_fetch_sims.side_effect = RuntimeError("markup changed")
         client.async_fetch_overspend.side_effect = RuntimeError("site down")
 
         coordinator = _make_coordinator(client)
@@ -571,7 +646,7 @@ class TestAccountDetail:
     @pytest.mark.asyncio
     async def test_a_removed_sim_does_not_break_usage(self) -> None:
         client = _client()
-        client.async_fetch_sim.side_effect = RuntimeError("no longer listed")
+        client.async_fetch_sims.side_effect = RuntimeError("no longer listed")
 
         coordinator = _make_coordinator(client)
         result = await coordinator._async_update_data()
@@ -583,7 +658,7 @@ class TestAccountDetail:
     async def test_an_expired_session_still_propagates(self) -> None:
         """Extras are optional, but a dropped session needs the reauth flow."""
         client = _client()
-        client.async_fetch_sim.side_effect = MozillionAuthError("login page")
+        client.async_fetch_sims.side_effect = MozillionAuthError("login page")
 
         coordinator = _make_coordinator(
             client,
@@ -600,9 +675,9 @@ class TestAccountDetail:
         """The retry must re-read all three, not just usage."""
         client = _client()
         client.async_login.return_value = ("new-cookie", "new-xsrf")
-        client.async_fetch_sim.side_effect = [
+        client.async_fetch_sims.side_effect = [
             MozillionAuthError("expired"),
-            MOCK_SIM,
+            [MOCK_SIM],
         ]
 
         coordinator = _make_coordinator(
@@ -656,11 +731,19 @@ class TestWalletIsActive:
 
 
 class TestDashboardCache:
-    """The 355 KB dashboard page is not re-read on every poll.
+    """The 355 KB dashboard page is not re-read on every poll, or for every SIM.
 
     Plan, service status and reset date change slowly, so the page has its own
-    cadence while usage and the wallet keep the full poll interval.
+    cadence while usage and the wallet keep the full poll interval. The page also
+    carries every SIM on the account, so the cache lives on the account's
+    ``MozillionDashboard`` (issue #73): one read serves all of them.
     """
+
+    @staticmethod
+    def _expire(dashboard: MozillionDashboard) -> None:
+        """Age the account's last dashboard read past DASHBOARD_REFRESH_INTERVAL."""
+
+        dashboard._fetched_at = time.monotonic() - (DASHBOARD_REFRESH_INTERVAL + 1)
 
     async def test_second_poll_reuses_the_cached_detail(self) -> None:
         client = _client()
@@ -669,7 +752,7 @@ class TestDashboardCache:
         await coordinator._async_update_data()
         await coordinator._async_update_data()
 
-        assert client.async_fetch_sim.await_count == 1
+        assert client.async_fetch_sims.await_count == 1
         # ...while the cheap JSON calls still happen every cycle.
         assert client.async_get_usage.await_count == 2
         assert client.async_fetch_overspend.await_count == 2
@@ -679,10 +762,10 @@ class TestDashboardCache:
         coordinator = _make_coordinator(client)
 
         await coordinator._async_update_data()
-        coordinator._sim_detail_at = time.monotonic() - (DASHBOARD_REFRESH_INTERVAL + 1)
+        self._expire(coordinator.dashboard)
         await coordinator._async_update_data()
 
-        assert client.async_fetch_sim.await_count == 2
+        assert client.async_fetch_sims.await_count == 2
 
     async def test_failed_refresh_keeps_the_last_reading(self) -> None:
         """One bad refresh must not blank the plan, status and reset entities."""
@@ -690,8 +773,8 @@ class TestDashboardCache:
         coordinator = _make_coordinator(client)
         await coordinator._async_update_data()
 
-        client.async_fetch_sim.side_effect = RuntimeError("markup changed")
-        coordinator._sim_detail_at = time.monotonic() - (DASHBOARD_REFRESH_INTERVAL + 1)
+        client.async_fetch_sims.side_effect = RuntimeError("markup changed")
+        self._expire(coordinator.dashboard)
         result = await coordinator._async_update_data()
 
         assert result[ATTR_SIM_STATUS] == "ACTIVE"
@@ -704,11 +787,142 @@ class TestDashboardCache:
         coordinator = _make_coordinator(client)
         await coordinator._async_update_data()
 
-        client.async_fetch_sim.side_effect = RuntimeError("markup changed")
+        client.async_fetch_sims.side_effect = RuntimeError("markup changed")
         for _ in range(REPAIR_FAILURE_THRESHOLD + 1):
             await coordinator._async_update_data()
 
         assert coordinator._dashboard_failures == 0
+
+    async def test_one_read_serves_two_sims_on_the_account(self) -> None:
+        """Issue #73: the page lists every SIM, so N SIMs read it once, not N times."""
+        client = _client()
+        client.async_fetch_sims.return_value = [MOCK_SIM, OTHER_SIM]
+        first, second = _two_sim_coordinators(client)
+
+        first_result = await first._async_update_data()
+        second_result = await second._async_update_data()
+
+        assert client.async_fetch_sims.await_count == 1
+        # Each SIM still gets its own detail out of the one page.
+        assert first_result[ATTR_SIM_STATUS] == "ACTIVE"
+        assert first_result[ATTR_PLAN_TARIFF] == "10GB"
+        assert second_result[ATTR_SIM_STATUS] == "SUSPENDED"
+        assert second_result[ATTR_PLAN_TARIFF] == "20GB"
+
+    async def test_two_sims_polling_together_make_one_read(self) -> None:
+        """A refresh cycle polls both coordinators; the account reads once."""
+        client = _client()
+        client.async_fetch_sims.return_value = [MOCK_SIM, OTHER_SIM]
+        first, second = _two_sim_coordinators(client)
+
+        await asyncio.gather(first._async_update_data(), second._async_update_data())
+        assert client.async_fetch_sims.await_count == 1
+
+        # Both poll again after the window: one read serves the pair once more,
+        # rather than two per cycle.
+        self._expire(first.dashboard)
+        await asyncio.gather(first._async_update_data(), second._async_update_data())
+
+        assert client.async_fetch_sims.await_count == 2
+
+    async def test_a_failed_read_is_not_cached(self) -> None:
+        """The next SIM retries instead of being served the cached error."""
+        client = _client()
+        client.async_fetch_sims.side_effect = RuntimeError("markup changed")
+        first, second = _two_sim_coordinators(client)
+
+        first_result = await first._async_update_data()
+
+        assert first_result[ATTR_SIM_STATUS] == ""
+        assert first.dashboard.cached(MOCK_SIM.sim_meta_id) is None
+        assert first._dashboard_failures == 1
+
+        client.async_fetch_sims.side_effect = None
+        client.async_fetch_sims.return_value = [MOCK_SIM, OTHER_SIM]
+        second_result = await second._async_update_data()
+
+        # Two attempts: the failure left nothing behind for the second SIM.
+        assert client.async_fetch_sims.await_count == 2
+        assert second_result[ATTR_SIM_STATUS] == "SUSPENDED"
+        # ...and the second SIM's success does not clear the first SIM's count,
+        # because that SIM's own entities are the ones affected.
+        assert first._dashboard_failures == 1
+
+
+class TestMozillionDashboard:
+    """The shared holder on its own, where the fetch count is unambiguous."""
+
+    @staticmethod
+    def _dashboard(client: AsyncMock) -> MozillionDashboard:
+        return MozillionDashboard(
+            client=client,
+            session=MozillionSession(cookie_header="cookie=abc", xsrf_token="xsrf-tok"),
+        )
+
+    async def test_reads_are_passed_the_shared_session(self) -> None:
+        client = _client()
+        dashboard = self._dashboard(client)
+
+        await dashboard.async_get(MOCK_SIM.sim_meta_id)
+
+        kwargs = client.async_fetch_sims.call_args.kwargs
+        assert kwargs["cookie_header"] == "cookie=abc"
+        assert kwargs["xsrf_token"] == "xsrf-tok"
+
+    async def test_the_lock_makes_two_simultaneous_reads_fetch_once(self) -> None:
+        """Without the lock the second caller would download the page too."""
+        client = _client()
+        dashboard = self._dashboard(client)
+
+        in_flight = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_fetch(**_kwargs: Any) -> list[MozillionSim]:
+            in_flight.set()
+            await release.wait()
+            return [MOCK_SIM, OTHER_SIM]
+
+        client.async_fetch_sims.side_effect = slow_fetch
+
+        first = asyncio.create_task(dashboard.async_get(MOCK_SIM.sim_meta_id))
+        await in_flight.wait()
+        second = asyncio.create_task(dashboard.async_get(OTHER_SIM.sim_meta_id))
+        # Give the second caller every chance to run: it reaches the lock while the
+        # first is still fetching, and parks there.
+        for _ in range(10):
+            await asyncio.sleep(0)
+        assert not second.done()
+
+        release.set()
+        sims = await asyncio.gather(first, second)
+
+        # One fetch, not two -- and both callers got their own SIM out of it.
+        assert client.async_fetch_sims.await_count == 1
+        assert [sim.sim_meta_id for sim in sims] == [
+            MOCK_SIM.sim_meta_id,
+            OTHER_SIM.sim_meta_id,
+        ]
+
+    async def test_a_stale_reading_is_not_served_as_fresh(self) -> None:
+        client = _client()
+        dashboard = self._dashboard(client)
+        await dashboard.async_get(MOCK_SIM.sim_meta_id)
+
+        TestDashboardCache._expire(dashboard)
+
+        assert dashboard.cached(MOCK_SIM.sim_meta_id) is None
+        # ...but it is still the fallback for a failed refresh.
+        assert dashboard.last_known(MOCK_SIM.sim_meta_id) == MOCK_SIM
+
+    async def test_a_sim_missing_from_the_page_is_reported(self) -> None:
+        client = _client()
+        dashboard = self._dashboard(client)
+
+        with pytest.raises(RuntimeError, match="no longer listed"):
+            await dashboard.async_get(OTHER_SIM.sim_meta_id)
+
+        # A page that parsed fine is still a success, so it is cached.
+        assert dashboard.cached(MOCK_SIM.sim_meta_id) == MOCK_SIM
 
 
 class TestCoordinatorLabel:

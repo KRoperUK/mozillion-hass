@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Coroutine
@@ -83,6 +84,98 @@ def _coordinator_label(subentry: ConfigSubentry) -> str:
     return mask_identifier(sim_number) if sim_number else SUBENTRY_TYPE_SIM
 
 
+class MozillionDashboard:
+    """Every SIM's dashboard detail for one account, read once per window.
+
+    ``MozillionClient.async_fetch_sims`` downloads and parses the whole ~355 KB
+    dashboard page, and that one page lists *every* SIM on the account. Holding the
+    cache on each coordinator therefore downloaded the same page once per SIM per
+    window -- N times the bandwidth and N spends from Mozillion's request budget on
+    an account with N SIMs -- which is issue #73.
+
+    So one of these is built per config entry, in ``async_setup_entry``, and shared
+    by every SIM's coordinator the way :class:`MozillionSession` is. It owns the
+    three things that make the read account-wide rather than per-SIM: the freshness
+    window (:data:`DASHBOARD_REFRESH_INTERVAL`), the parsed SIMs keyed by
+    ``sim_meta_id``, and the lock that makes two coordinators polling in the same
+    cycle perform one fetch.
+
+    Taking the lock and *then* re-checking freshness is :class:`MozillionSession`'s
+    shape, and for the same reason: the loser of the race has to find the winner's
+    result already in place, or the lock would only serialise two duplicate reads
+    instead of preventing one.
+    """
+
+    def __init__(self, client: MozillionClient, session: MozillionSession) -> None:
+        self._client = client
+        self._session = session
+        # The last successful read, keyed by sim_meta_id. Never holds a failure.
+        self._sims: dict[str, MozillionSim] = {}
+        # Monotonic time of that read, or None before the first success.
+        self._fetched_at: float | None = None
+        # Only one fetch may be in flight, however many SIMs poll at once.
+        self._lock: asyncio.Lock = asyncio.Lock()
+
+    def cached(self, sim_meta_id: str) -> MozillionSim | None:
+        """Return this SIM's detail while the account's last read is still fresh."""
+
+        if not self._is_fresh():
+            return None
+        return self._sims.get(sim_meta_id)
+
+    def last_known(self, sim_meta_id: str) -> MozillionSim | None:
+        """Return this SIM's most recent detail, however old it is.
+
+        Only the fallback for a failed refresh: one bad read must not blank the
+        plan, status and reset entities of a SIM that was read fine before.
+        """
+
+        return self._sims.get(sim_meta_id)
+
+    async def async_get(self, sim_meta_id: str) -> MozillionSim:
+        """Return one SIM's detail, reading the account's page at most once."""
+
+        sim = self.cached(sim_meta_id)
+        if sim is not None:
+            return sim
+
+        async with self._lock:
+            # Another SIM's coordinator may have read the page while we waited for
+            # the lock, which is the entire point of taking it.
+            if self._is_fresh():
+                return self._require(sim_meta_id)
+
+            sims = await self._client.async_fetch_sims(
+                cookie_header=self._session.cookie_header or "",
+                xsrf_token=self._session.xsrf_token,
+            )
+            # Successes only. A raise above leaves the previous reading and its
+            # timestamp untouched, so the next mid-cycle caller retries instead of
+            # being served a cached error, and the SIMs that did read keep their
+            # last good detail.
+            self._sims = {detail.sim_meta_id: detail for detail in sims}
+            self._fetched_at = time.monotonic()
+            return self._require(sim_meta_id)
+
+    def _is_fresh(self) -> bool:
+        """Return True while the last successful read is inside the window."""
+
+        if self._fetched_at is None:
+            return False
+        return (time.monotonic() - self._fetched_at) < DASHBOARD_REFRESH_INTERVAL
+
+    def _require(self, sim_meta_id: str) -> MozillionSim:
+        """Return a SIM the freshly read page must list, or explain the absence."""
+
+        sim = self._sims.get(sim_meta_id)
+        if sim is None:
+            raise RuntimeError(
+                f"SIM {sim_meta_id} is no longer listed on the Mozillion "
+                "dashboard; it may have been removed from the account"
+            )
+        return sim
+
+
 class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
     """Coordinator to poll the Mozillion usage endpoints."""
 
@@ -93,12 +186,16 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
         entry: ConfigEntry,
         subentry: ConfigSubentry,
         session: MozillionSession,
+        dashboard: MozillionDashboard,
         update_interval: timedelta,
     ) -> None:
         self.client = client
         self.subentry = subentry
         # One session per account, shared with every other SIM's coordinator.
         self.session = session
+        # ...and one dashboard read per account too: the page carries every SIM,
+        # so sharing it turns N downloads per window into one.
+        self.dashboard = dashboard
         self._reset_poll_state()
 
         super().__init__(
@@ -138,13 +235,12 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         # Consecutive failed reads of the dashboard, used to decide when the
         # markup breakage is worth telling the user about, and whether we have an
-        # outstanding repair to withdraw.
+        # outstanding repair to withdraw. Per SIM, because each SIM's plan, status
+        # and reset entities are what go stale; the parsed page itself and its
+        # freshness window belong to the account and live on the shared
+        # MozillionDashboard.
         self._dashboard_failures = 0
         self._dashboard_repair_active = False
-        # Last good dashboard reading, reused until DASHBOARD_REFRESH_INTERVAL
-        # has passed, so the big page is not re-read every poll.
-        self._sim_detail: MozillionSim | None = None
-        self._sim_detail_at: float | None = None
 
     async def _async_refresh_auth(self) -> None:
         """Log in through the shared session, persisting it only once.
@@ -173,15 +269,6 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         return await self.client.async_get_usage(
             order_detail_id=self.subentry.data[CONF_ORDER_DETAIL_ID],
-            sim_meta_id=self.subentry.data[CONF_SIM_META_ID],
-            cookie_header=self.session.cookie_header or "",
-            xsrf_token=self.session.xsrf_token,
-        )
-
-    async def _async_fetch_sim(self) -> MozillionSim:
-        """Read the plan/reset/status detail for this SIM from the dashboard."""
-
-        return await self.client.async_fetch_sim(
             sim_meta_id=self.subentry.data[CONF_SIM_META_ID],
             cookie_header=self.session.cookie_header or "",
             xsrf_token=self.session.xsrf_token,
@@ -233,12 +320,17 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
         return raw, sim, wallet
 
     async def _async_read_dashboard(self) -> MozillionSim | None:
-        """Read the dashboard detail, tracking whether the page still parses.
+        """Read this SIM's dashboard detail through the account's shared holder.
 
         The 355 KB dashboard page carries the plan, service status and reset date --
         none of which change on an hourly basis (the reset label is monthly) -- so it
         is refreshed on its own slower cadence and the rest of the poll reuses it.
         Usage and the wallet come from small JSON calls and keep the full interval.
+
+        The page is read once per *account*, not once per SIM: it lists every SIM
+        anyway, so :class:`MozillionDashboard` fetches it inside the window and this
+        SIM asks only for its own entry. Counting failures stays per SIM, because a
+        SIM's own plan, status and reset entities are what go without.
 
         The page markup is also this integration's one genuinely fragile dependency,
         and when it changes the only symptom used to be a log line: the plan, status
@@ -247,12 +339,17 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
         Assistant, and the last good reading keeps being served meanwhile.
         """
 
-        cached = self._cached_sim_detail()
+        sim_meta_id = str(self.subentry.data[CONF_SIM_META_ID])
+        cached = self.dashboard.cached(sim_meta_id)
         if cached is not None:
+            # Another SIM's coordinator -- or this one on an earlier poll -- read
+            # the page inside the window, which is proof that it still parses, so
+            # a repair this SIM is still carrying can be withdrawn.
+            self._note_dashboard_success()
             return cached
 
         try:
-            sim = await self._async_fetch_sim()
+            sim = await self.dashboard.async_get(sim_meta_id)
         except MozillionAuthError:
             raise
         except RuntimeError as err:
@@ -265,12 +362,20 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             )
             if self._dashboard_failures >= REPAIR_FAILURE_THRESHOLD:
                 self._raise_dashboard_repair(str(err))
-            # Keep serving the last good reading rather than blanking the plan,
-            # status and reset entities over one failed refresh.
-            return self._sim_detail
+            # Keep serving this SIM's last good reading rather than blanking the
+            # plan, status and reset entities over one failed refresh.
+            return self.dashboard.last_known(sim_meta_id)
 
-        self._sim_detail = sim
-        self._sim_detail_at = time.monotonic()
+        self._note_dashboard_success()
+        return sim
+
+    def _note_dashboard_success(self) -> None:
+        """Record a good read: clear the failure streak and any repair.
+
+        Called on a shared cache hit as well as on a fresh read. A cache hit means
+        the page was parsed inside the window by *some* SIM on this account, which
+        is exactly the condition the repair exists to report the absence of.
+        """
 
         if self._dashboard_failures:
             _LOGGER.info(
@@ -279,16 +384,6 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             )
             self._dashboard_failures = 0
         self._clear_dashboard_repair()
-        return sim
-
-    def _cached_sim_detail(self) -> MozillionSim | None:
-        """Return the cached dashboard detail while it is still fresh."""
-
-        if self._sim_detail is None or self._sim_detail_at is None:
-            return None
-        if (time.monotonic() - self._sim_detail_at) < DASHBOARD_REFRESH_INTERVAL:
-            return self._sim_detail
-        return None
 
     def _raise_dashboard_repair(self, error: str) -> None:
         """Tell the user the dashboard cannot be read."""

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from dataclasses import replace
 from datetime import date
 from types import MappingProxyType
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -12,15 +14,18 @@ from custom_components.mozillion.const import (
     ATTR_BILLING_AMOUNT,
     ATTR_HAS_BILL,
     ATTR_PLAN_PARENTAL_CONTROL,
+    ATTR_PLAN_TARIFF,
     ATTR_PLAN_VOICEMAIL,
     ATTR_PORT_DATE,
     ATTR_PORT_STATUS,
+    ATTR_SIM_STATUS,
     ATTR_USAGE,
     CONF_ICCID,
     CONF_ORDER_DETAIL_ID,
     CONF_SESSION_COOKIE,
     CONF_SIM_META_ID,
     CONF_SIM_NUMBER,
+    DASHBOARD_REFRESH_INTERVAL,
     DOMAIN,
     SUBENTRY_TYPE_SIM,
 )
@@ -36,6 +41,7 @@ from tests.conftest import (
     MOCK_SIM,
     MOCK_WALLET,
     _make_config_entry,
+    _sim_subentry_data,
     sim_subentry,
 )
 
@@ -63,7 +69,8 @@ def _client(**overrides) -> MagicMock:
     client.async_login = AsyncMock(
         return_value=("mozillion_session=abc; XSRF-TOKEN=xyz", "xyz")
     )
-    client.async_fetch_sims = AsyncMock(return_value=[])
+    # The dashboard page lists the account's SIMs, as the real one does.
+    client.async_fetch_sims = AsyncMock(return_value=[MOCK_SIM])
     client.async_fetch_sim = AsyncMock(return_value=MOCK_SIM)
     client.async_fetch_overspend = AsyncMock(return_value=MOCK_WALLET)
     for key, value in overrides.items():
@@ -427,3 +434,86 @@ async def test_setup_gives_the_client_its_own_session(hass: HomeAssistant) -> No
         await hass.async_block_till_done()
 
     session.assert_called_once_with(hass)
+
+
+# A second SIM on the same account. The plan differs so the test can tell that
+# each coordinator received its own detail from the one page download.
+SECOND_SIM = replace(
+    MOCK_SIM,
+    sim_meta_id="7654322",
+    order_detail_id="1234568",
+    sim_number="07700900001",
+    iccid="89440000000000000001",
+    status="SUSPENDED",
+    plan_data_tariff="20GB",
+)
+
+
+def _two_sim_entry(hass: HomeAssistant) -> MockConfigEntry:
+    """An account entry with two SIM subentries, as the config flow creates them."""
+
+    entry = _make_config_entry(
+        data=dict(MOCK_ENTRY_DATA_COOKIE),
+        subentries=[
+            _sim_subentry_data(),
+            _sim_subentry_data(
+                order_detail_id=SECOND_SIM.order_detail_id,
+                sim_meta_id=SECOND_SIM.sim_meta_id,
+                sim_number=SECOND_SIM.sim_number,
+                iccid=SECOND_SIM.iccid,
+            ),
+        ],
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def test_one_read_serves_every_sim_on_the_account(
+    hass: HomeAssistant, frozen_today: date
+) -> None:
+    """Issue #73: two SIMs used to download the 355 KB dashboard twice.
+
+    The page lists every SIM on the account, so one download has to serve them
+    all -- during setup, again on every poll inside the window, and once more per
+    window after that.
+    """
+
+    entry = _two_sim_entry(hass)
+    client = _client(async_fetch_sims=AsyncMock(return_value=[MOCK_SIM, SECOND_SIM]))
+
+    with patch(CLIENT, return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id) is True
+        await hass.async_block_till_done()
+
+        assert entry.state is ConfigEntryState.LOADED
+        # Both SIMs' first refresh, one download.
+        assert client.async_fetch_sims.await_count == 1
+
+        coordinators = list(entry.runtime_data.coordinators.values())
+        assert len(coordinators) == 2
+        # Each SIM still receives its own detail out of that one page.
+        assert sorted(c.data[ATTR_SIM_STATUS] for c in coordinators) == [
+            "ACTIVE",
+            "SUSPENDED",
+        ]
+        assert sorted(c.data[ATTR_PLAN_TARIFF] for c in coordinators) == [
+            "10GB",
+            "20GB",
+        ]
+        # And they share one session and one dashboard holder, as one account.
+        assert {id(c.dashboard) for c in coordinators} == {
+            id(entry.runtime_data.dashboard)
+        }
+        assert {id(c.session) for c in coordinators} == {id(entry.runtime_data.session)}
+
+        # A poll inside the window reads nothing at all.
+        for coordinator in coordinators:
+            await coordinator.async_refresh()
+        assert client.async_fetch_sims.await_count == 1
+
+        # A poll after it reads the page once, for both SIMs.
+        dashboard = entry.runtime_data.dashboard
+        dashboard._fetched_at = time.monotonic() - (DASHBOARD_REFRESH_INTERVAL + 1)
+        for coordinator in coordinators:
+            await coordinator.async_refresh()
+        assert client.async_fetch_sims.await_count == 2

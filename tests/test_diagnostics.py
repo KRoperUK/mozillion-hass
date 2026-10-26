@@ -79,6 +79,7 @@ def _entry_with_coordinator(hass: HomeAssistant) -> tuple[MockConfigEntry, str]:
     entry.runtime_data = MozillionRuntimeData(
         client=MagicMock(),
         session=MagicMock(),
+        dashboard=MagicMock(),
         coordinators={subentry_id: coordinator},
     )
     return entry, subentry_id
