@@ -7,15 +7,17 @@ unavailable entities.
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from aiohttp import ClientError, ClientSession
+from aiohttp import ClientSession
 from custom_components.mozillion import MozillionAuthError
 from custom_components.mozillion.api import MozillionClient
 from custom_components.mozillion.const import (
     ATTR_SIM_STATUS,
     ATTR_USAGE,
+    DASHBOARD_PATH,
     DOMAIN,
     ISSUE_DASHBOARD_UNREADABLE,
     REPAIR_FAILURE_THRESHOLD,
@@ -23,6 +25,7 @@ from custom_components.mozillion.const import (
 from custom_components.mozillion.coordinator import MozillionCoordinator
 from custom_components.mozillion.session import MozillionSession
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import issue_registry as ir
 
 from tests.conftest import (
@@ -218,9 +221,18 @@ class TestDashboardRepair:
         assert coordinator._dashboard_failures == 0
         assert _issue(hass) is None
 
-    async def test_clientside_errors_also_count(self, hass: HomeAssistant) -> None:
+    async def test_network_errors_also_count(self, hass: HomeAssistant) -> None:
+        """A connection failure is not an auth problem, so it still counts.
+
+        MozillionClient converts aiohttp's ClientError into a RuntimeError at
+        the API boundary, so a broken connection arrives as a RuntimeError and
+        has to reach the repair just as changed markup does.
+        """
         coordinator, client = _coordinator(hass)
-        client.async_fetch_sim.side_effect = ClientError("connection reset")
+        client.async_fetch_sim.side_effect = RuntimeError(
+            "Error fetching https://www.mozillion.com/new-user-dashboard: "
+            "connection reset"
+        )
 
         for _ in range(REPAIR_FAILURE_THRESHOLD):
             await coordinator._async_update_data()
@@ -246,3 +258,96 @@ class TestDashboardRepair:
         assert {call.args[2] for call in create.call_args_list} == {
             ISSUE_DASHBOARD_UNREADABLE
         }
+
+
+# ---------------------------------------------------------------------------
+# Dashboard repair, through the real client
+# ---------------------------------------------------------------------------
+
+
+def _html_response(body: str) -> MagicMock:
+    """A text/html response as the real client sees it."""
+    resp = MagicMock()
+    resp.status = 200
+    resp.headers = {"Content-Type": "text/html; charset=UTF-8"}
+    resp.raise_for_status = MagicMock()
+    resp.text = AsyncMock(return_value=body)
+    return resp
+
+
+def _json_response(payload: dict[str, Any]) -> MagicMock:
+    resp = _html_response("")
+    resp.headers = {"Content-Type": "application/json"}
+    resp.json = AsyncMock(return_value=payload)
+    return resp
+
+
+def _real_client_coordinator(
+    hass: HomeAssistant, dashboard_body: str
+) -> MozillionCoordinator:
+    """A coordinator over a real client, with only the HTTP session mocked.
+
+    The point is the seam: the classification the API makes is what the
+    coordinator then acts on, so a login page has to become a reauth and an
+    unreadable dashboard has to become a repair.
+    """
+
+    entry = _make_config_entry(data=MOCK_ENTRY_DATA_COOKIE)
+    entry.add_to_hass(hass)
+
+    session = MagicMock(spec=ClientSession)
+
+    def _get(url: str, **_kwargs: Any) -> MagicMock:
+        response = (
+            _html_response(dashboard_body)
+            if DASHBOARD_PATH in url
+            else _json_response(MOCK_API_RESPONSE)
+        )
+        return _ctx(response)
+
+    session.get = MagicMock(side_effect=_get)
+
+    return MozillionCoordinator(
+        hass=hass,
+        client=MozillionClient(session),
+        entry=entry,
+        subentry=sim_subentry(entry),
+        session=MozillionSession(
+            cookie_header="mozillion_session=abc", xsrf_token="xyz"
+        ),
+        update_interval=None,
+    )
+
+
+class TestDashboardClassification:
+    """The api's auth-bounce check decides repair versus reauth."""
+
+    async def test_a_login_page_bounces_to_reauth_not_to_a_repair(
+        self, hass: HomeAssistant
+    ) -> None:
+        """An expired session must never be reported as broken markup."""
+        coordinator = _real_client_coordinator(
+            hass, '<form action="/login-post"><input name="password"></form>'
+        )
+
+        with pytest.raises(ConfigEntryAuthFailed):
+            await coordinator._async_update_data()
+
+        assert coordinator._dashboard_failures == 0
+        assert _issue(hass) is None
+
+    async def test_a_dashboard_that_parses_to_nothing_raises_the_repair(
+        self, hass: HomeAssistant
+    ) -> None:
+        """Changed markup is a repair, and the reason reaches the user."""
+        coordinator = _real_client_coordinator(
+            hass, "<html><body>maintenance</body></html>"
+        )
+
+        for _ in range(REPAIR_FAILURE_THRESHOLD):
+            await coordinator._async_update_data()
+
+        issue = _issue(hass)
+        assert issue is not None
+        assert "No SIMs found" in issue.translation_placeholders["error"]
+        assert coordinator._dashboard_failures == REPAIR_FAILURE_THRESHOLD

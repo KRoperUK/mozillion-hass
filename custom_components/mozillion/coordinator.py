@@ -8,7 +8,6 @@ from collections.abc import Coroutine
 from datetime import timedelta
 from typing import Any, TypeVar
 
-from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -22,6 +21,7 @@ from .api import (
     MozillionSim,
     mask_identifier,
     parse_reset_date,
+    to_float,
 )
 from .const import (
     ATTR_BILLING_AMOUNT,
@@ -74,17 +74,6 @@ _LOGGER = logging.getLogger(__name__)
 CoordinatorData = dict[str, Any]
 
 _T = TypeVar("_T")
-
-
-def _to_float(value: Any) -> float | None:
-    """Coerce an API value to float, treating blanks/None as unknown."""
-
-    if value is None or value == "":
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _coordinator_label(subentry: ConfigSubentry) -> str:
@@ -223,7 +212,11 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             return await coro
         except MozillionAuthError:
             raise
-        except (RuntimeError, ClientError) as err:
+        except RuntimeError as err:
+            # RuntimeError, not aiohttp's ClientError: MozillionClient converts
+            # every ClientError into a RuntimeError at the API boundary, so one
+            # cannot arrive here. MozillionAuthError is a RuntimeError subclass,
+            # which is why it is handled first and re-raised.
             _LOGGER.warning("Could not read %s from Mozillion: %s", what, err)
             return None
 
@@ -262,7 +255,7 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             sim = await self._async_fetch_sim()
         except MozillionAuthError:
             raise
-        except (RuntimeError, ClientError) as err:
+        except RuntimeError as err:
             self._dashboard_failures += 1
             _LOGGER.warning(
                 "Could not read the Mozillion dashboard (%d consecutive "
@@ -348,7 +341,7 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             raw, sim, wallet = await self._async_read_all()
         except MozillionAuthError as err:
             raw, sim, wallet = await self._async_retry_after_auth_error(err)
-        except (RuntimeError, ClientError) as err:
+        except RuntimeError as err:
             _LOGGER.error("Update failed: %s", err)
             raise UpdateFailed(err) from err
 
@@ -402,7 +395,7 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             raise ConfigEntryAuthFailed(
                 "Mozillion rejected the configured credentials"
             ) from retry_error
-        except (RuntimeError, ClientError) as retry_error:
+        except RuntimeError as retry_error:
             raise UpdateFailed(retry_error) from retry_error
 
 
@@ -419,8 +412,8 @@ def _build_coordinator_data(
     and ``wallet`` are optional: the integration keeps working without them.
     """
 
-    usage = _to_float(raw.get("usedData"))
-    total = _to_float(raw.get("totalData"))
+    usage = to_float(raw.get("usedData"))
+    total = to_float(raw.get("totalData"))
     unlimited = bool(raw.get("isUnlimited"))
 
     remaining: float | None = None
@@ -438,10 +431,10 @@ def _build_coordinator_data(
         ATTR_REMAINING: remaining,
         ATTR_USAGE_PERCENTAGE: usage_percentage,
         ATTR_UNLIMITED: unlimited,
-        ATTR_USAGE_GBR: _to_float(raw.get("usedDataGbr")),
-        ATTR_TOTAL_GBR: _to_float(raw.get("totalDataGbr")),
-        ATTR_USAGE_GLOBAL: _to_float(raw.get("usedDataGlobal")),
-        ATTR_TOTAL_GLOBAL: _to_float(raw.get("totalDataGlobal")),
+        ATTR_USAGE_GBR: to_float(raw.get("usedDataGbr")),
+        ATTR_TOTAL_GBR: to_float(raw.get("totalDataGbr")),
+        ATTR_USAGE_GLOBAL: to_float(raw.get("usedDataGlobal")),
+        ATTR_TOTAL_GLOBAL: to_float(raw.get("totalDataGlobal")),
         ATTR_SIM_STATUS: "",
         ATTR_RESET_DATE: None,
         ATTR_RESET_LABEL: "",
@@ -494,8 +487,8 @@ def _build_coordinator_data(
         data[ATTR_WALLET] = wallet
         # `remaining` is the figure mozillion.com displays as "Your balance";
         # `balance` is carried through untouched inside ATTR_WALLET.
-        data[ATTR_WALLET_BALANCE] = _to_float(wallet.get("remaining"))
-        data[ATTR_WALLET_SPEND] = _to_float(wallet.get("spent"))
+        data[ATTR_WALLET_BALANCE] = to_float(wallet.get("remaining"))
+        data[ATTR_WALLET_SPEND] = to_float(wallet.get("spent"))
         data[ATTR_OVERSPEND_LIMIT_REACHED] = bool(wallet.get("reached"))
 
     return data
