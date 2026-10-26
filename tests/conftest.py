@@ -6,7 +6,8 @@ type ``sim``, mirroring how the integration is actually structured.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -291,14 +292,24 @@ def sim_subentry(entry: ConfigEntry) -> ConfigSubentry:
 # ---------------------------------------------------------------------------
 # A pinned clock for reset-date assertions
 # ---------------------------------------------------------------------------
-# ``parse_reset_date`` reads the wall clock: a label with no year ("19 Oct") is
-# rolled forward to its next occurrence, so an expected date is only correct
-# until the fixture's day of the month comes round. ``api.py`` does
-# ``from datetime import date``, so patching that module attribute is the seam;
-# a subclass keeps the date constructor working because ``parse_reset_date``
-# also builds dates to validate the label. 2026-09-21 puts "19 Oct" in the
-# future, so the rolled-forward answer is 2026-10-19.
+# The reset date is worked out against "today": a label with no year ("19 Oct")
+# is rolled forward to its next occurrence, and a day count is added to today, so
+# an expected date is only correct until the fixture's day of the month comes
+# round. Two seams read the clock and both have to be pinned:
+#
+# * ``parse_reset_date`` falls back to ``date.today()``, and ``api.py`` does
+#   ``from datetime import date``, so patching that module attribute is the seam
+#   for its direct callers. A subclass keeps the date constructor working,
+#   because ``parse_reset_date`` also builds dates to validate the label.
+# * the coordinator passes Home Assistant's date explicitly
+#   (``dt_util.now().date()``), so its ``dt_util`` name is pinned too -- the
+#   module-level name, not ``homeassistant.util.dt`` itself, so nothing else in
+#   the run sees a frozen clock.
+#
+# 2026-09-21 puts "19 Oct" in the future, so the rolled-forward answer is
+# 2026-10-19.
 PINNED_TODAY = date(2026, 9, 21)
+PINNED_NOW = datetime(2026, 9, 21, 12, tzinfo=UTC)
 
 
 class _PinnedDate(date):
@@ -311,8 +322,12 @@ class _PinnedDate(date):
 
 @pytest.fixture
 def frozen_today(monkeypatch: pytest.MonkeyPatch) -> date:
-    """Pin the clock ``parse_reset_date`` reads and report the pinned date."""
+    """Pin both clocks the reset date comes from and report the pinned date."""
     monkeypatch.setattr("custom_components.mozillion.api.date", _PinnedDate)
+    monkeypatch.setattr(
+        "custom_components.mozillion.coordinator.dt_util",
+        SimpleNamespace(now=lambda: PINNED_NOW),
+    )
     return PINNED_TODAY
 
 

@@ -14,6 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .api import (
     MozillionAuthError,
@@ -467,7 +468,13 @@ def _build_coordinator_data(
         data[ATTR_SIM_STATUS] = sim.status
         data[ATTR_RESET_LABEL] = sim.reset_label
         data[ATTR_DAYS_LEFT] = sim.days_left
-        data[ATTR_RESET_DATE] = parse_reset_date(sim.reset_label, sim.days_left)
+        # Home Assistant's clock, not the process's: ``date.today()`` is the
+        # container's time zone, which is usually UTC while the user's Home
+        # Assistant is not, so between midnight and the UTC offset the reset
+        # date came out a day early.
+        data[ATTR_RESET_DATE] = parse_reset_date(
+            sim.reset_label, sim.days_left, today=dt_util.now().date()
+        )
         data[ATTR_PLAN_TARIFF] = sim.plan_data_tariff
         data[ATTR_PLAN_DURATION] = sim.plan_duration
         data[ATTR_PLAN_ROAMING] = sim.plan_roaming

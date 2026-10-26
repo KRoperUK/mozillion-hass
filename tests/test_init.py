@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from types import MappingProxyType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -15,10 +16,16 @@ from custom_components.mozillion.const import (
     ATTR_PORT_DATE,
     ATTR_PORT_STATUS,
     ATTR_USAGE,
+    CONF_ICCID,
+    CONF_ORDER_DETAIL_ID,
+    CONF_SESSION_COOKIE,
+    CONF_SIM_META_ID,
+    CONF_SIM_NUMBER,
     DOMAIN,
+    SUBENTRY_TYPE_SIM,
 )
 from custom_components.mozillion.coordinator import MozillionCoordinator
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import ConfigEntryState, ConfigSubentry
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -202,6 +209,114 @@ async def test_scan_interval_drives_the_schedule(hass: HomeAssistant) -> None:
     coordinator: MozillionCoordinator = _sim_coordinator(entry)
     assert coordinator.update_interval is not None
     assert coordinator.update_interval.total_seconds() == 7200
+
+
+async def test_a_session_refresh_does_not_reload_the_entry(
+    hass: HomeAssistant,
+) -> None:
+    """Logging in again writes the entry's data and must not reload it.
+
+    The coordinator persists every refreshed session with
+    ``async_update_entry``, and Home Assistant fires the entry's update listeners
+    for any write. Reloading there tore the entities down mid-poll, discarded the
+    in-flight update and started a second login, because a freshly loaded session
+    begins unauthenticated.
+    """
+
+    entry = _entry(hass, email="user@example.com", password="secret123")
+    client = _client()
+    # Setup logs in once; the forced refresh logs in again with new cookies, so
+    # the entry write really does change its data. The third answer is only used
+    # if the entry reloads and logs in a second time for the one refresh.
+    client.async_login = AsyncMock(
+        side_effect=[
+            ("initial", "initial-xsrf"),
+            ("refreshed", "refreshed-xsrf"),
+            ("reloaded", "reloaded-xsrf"),
+        ]
+    )
+
+    with patch(CLIENT, return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id) is True
+        await hass.async_block_till_done()
+
+        runtime_data = entry.runtime_data
+        coordinator = _sim_coordinator(entry)
+        assert entry.data[CONF_SESSION_COOKIE] == "initial"
+        # Sets up the 12-hourly refresh on the next poll.
+        coordinator.session.authenticated_at = None
+        client.async_login.reset_mock()
+
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+    # The entry was written -- otherwise the "no reload" assertions below would
+    # pass for the wrong reason.
+    assert entry.data[CONF_SESSION_COOKIE] == "refreshed"
+    assert client.async_login.await_count == 1
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data is runtime_data
+    assert _sim_coordinator(entry) is coordinator
+
+
+async def test_adding_a_sim_reloads_the_entry(hass: HomeAssistant) -> None:
+    """Adding a SIM changes the entity set, so the entry must be rebuilt."""
+
+    entry = _entry(hass)
+
+    with patch(CLIENT, return_value=_client()):
+        assert await hass.config_entries.async_setup(entry.entry_id) is True
+        await hass.async_block_till_done()
+
+        runtime_data = entry.runtime_data
+        second_sim = ConfigSubentry(
+            data=MappingProxyType(
+                {
+                    CONF_ORDER_DETAIL_ID: "1234568",
+                    CONF_SIM_META_ID: "7654322",
+                    CONF_SIM_NUMBER: "07700900001",
+                    CONF_ICCID: "89440000000000000001",
+                }
+            ),
+            subentry_type=SUBENTRY_TYPE_SIM,
+            title="07700900001",
+            unique_id="7654322",
+        )
+        assert hass.config_entries.async_add_subentry(entry, second_sim) is True
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    # A reload rebuilt the runtime data, and every SIM now has a coordinator.
+    assert entry.runtime_data is not runtime_data
+    assert set(entry.runtime_data.coordinators) == set(entry.subentries)
+
+
+async def test_changing_the_scan_interval_reloads_the_entry(
+    hass: HomeAssistant,
+) -> None:
+    """The options flow shares the update listener, so it must still reload.
+
+    The polling interval is read once at setup, so ignoring an options write here
+    would leave a changed scan interval with no effect until the next restart.
+    """
+
+    entry = _entry(hass)
+
+    with patch(CLIENT, return_value=_client()):
+        assert await hass.config_entries.async_setup(entry.entry_id) is True
+        await hass.async_block_till_done()
+
+        runtime_data = entry.runtime_data
+        assert hass.config_entries.async_update_entry(
+            entry, options={"scan_interval": 7200}
+        )
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data is not runtime_data
+    assert _sim_coordinator(entry).update_interval is not None
+    assert _sim_coordinator(entry).update_interval.total_seconds() == 7200
 
 
 async def test_coordinator_is_bound_to_the_entry(hass: HomeAssistant) -> None:
