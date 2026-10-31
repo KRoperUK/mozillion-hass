@@ -41,7 +41,7 @@ dev = [
     "requests-mock==1.12.1",
     "respx==0.23.1",
     "python-dotenv",
-    "ruff==0.17.2",
+    "ruff==0.17.3",
     "mypy==2.4.0",
 ]
 
