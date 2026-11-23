@@ -12,3 +12,14 @@ services:
       - ./custom_components:/config/custom_components
     # Uncomment to match host network if needed (not required for basic UI use)
     # network_mode: host
+
+  # Clears Cloudflare's challenge for the integration. In the config flow, enter
+  # http://flaresolverr:8191/v1 when it reports that Cloudflare is blocking sign-in.
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr-dev
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: info
+    ports:
+      - "8191:8191"

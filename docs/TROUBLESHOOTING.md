@@ -25,6 +25,29 @@ logger:
   source of the Mozillion dashboard: they are the `data-orderdetail-id` and
   `data-sim-id` attributes on the SIM buttons.
 
+### "Cloudflare is blocking sign-in from this network"
+
+Mozillion sits behind Cloudflare, which sometimes answers automated requests with
+a "Just a moment…" challenge (HTTP 403, header `cf-mitigated: challenge`). It is
+not a wrong password, and the integration never starts re-authentication for it.
+Two ways round it:
+
+1. **FlareSolverr (recommended, unattended).** Run it on the same network as Home
+   Assistant, then paste its address (for example `http://flaresolverr:8191/v1`)
+   into the *FlareSolverr address* field that appears after the block. It solves
+   the challenge in a real browser; the integration reuses the clearance and asks
+   it again whenever Cloudflare re-challenges. Cloudflare ties the clearance to
+   your IP address, so FlareSolverr must reach the internet from the same address
+   as Home Assistant.
+2. **Browser session.** Start again, choose *Browser session cookie*, and paste
+   the cookie header from a browser that has already passed the challenge. It
+   cannot renew itself, so you will be asked again when it expires.
+
+"FlareSolverr could not clear Cloudflare's challenge" means the address is wrong
+or unreachable, or the solver timed out. Check its container log. Cloudflare
+changes its checks often, so a solver that worked can stop working until it is
+updated.
+
 ### "This SIM is already configured"
 
 Each SIM can only be tracked once. Delete the existing entry, or use

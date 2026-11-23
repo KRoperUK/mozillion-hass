@@ -7,13 +7,12 @@ page, which is what lets one set of credentials cover every SIM.
 
 from __future__ import annotations
 
-import importlib
-import importlib.util
+import asyncio
 import logging
 from collections.abc import Mapping
-from types import ModuleType
 from typing import Any
 
+from aiohttp import ClientError, ClientSession, ClientTimeout
 from homeassistant import config_entries
 from homeassistant.config_entries import (
     ConfigEntry,
@@ -24,11 +23,25 @@ from homeassistant.config_entries import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import selector
-from homeassistant.helpers.aiohttp_client import async_create_clientsession
+from homeassistant.helpers.aiohttp_client import (
+    async_create_clientsession,
+    async_get_clientsession,
+)
 
-from .api import MozillionAuthError, MozillionClient, MozillionSim
+from ._compat import schema
+from .api import (
+    MozillionAuthError,
+    MozillionChallengeError,
+    MozillionClient,
+    MozillionSim,
+    MozillionSolverError,
+    MozillionTotpSecretError,
+    MozillionTwoFactorRejected,
+    MozillionTwoFactorRequired,
+)
 from .const import (
     CONF_EMAIL,
+    CONF_FLARESOLVERR_URL,
     CONF_ICCID,
     CONF_ORDER_DETAIL_ID,
     CONF_ORIGIN,
@@ -42,16 +55,11 @@ from .const import (
     DEFAULT_ORIGIN,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    SOLVER_CANDIDATES,
+    SOLVER_PROBE_TIMEOUT,
     SUBENTRY_TYPE_SIM,
 )
 from .session import has_credentials
-
-# Home Assistant 2026.10 replaced voluptuous with probatio for flow schemas.
-# hacs.json still declares 2026.6 as the minimum, so pick whichever the running
-# core provides rather than requiring the newest release.
-schema: ModuleType = importlib.import_module(
-    "probatio" if importlib.util.find_spec("probatio") else "voluptuous"
-)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -62,7 +70,9 @@ _LOGGER = logging.getLogger(__name__)
 MIN_SCAN_INTERVAL = 60
 
 
-def _dedicated_client(hass: HomeAssistant) -> MozillionClient:
+def _dedicated_client(
+    hass: HomeAssistant, flaresolverr_url: str | None = None
+) -> MozillionClient:
     """Build a client on a session the caller owns.
 
     The session deliberately does not come from ``async_get_clientsession``:
@@ -78,53 +88,140 @@ def _dedicated_client(hass: HomeAssistant) -> MozillionClient:
     ``MozillionConfigFlow._async_client``.
     """
 
-    return MozillionClient(async_create_clientsession(hass))
+    return MozillionClient(
+        async_create_clientsession(hass), flaresolverr_url=flaresolverr_url or None
+    )
 
 
-def _credentials_schema(defaults: Mapping[str, Any] | None = None) -> dict[Any, Any]:
-    """Build the shared credential fields used by setup and reauth."""
+# Errors that mean "ask for (or re-ask for) the 2FA secret" rather than "start over".
+_TOTP_ERRORS = frozenset({"two_factor_required", "invalid_totp"})
+# Errors fixed by changing how we reach Mozillion, not by changing a credential.
+_BLOCKED_ERRORS = frozenset({"cloudflare_blocked", "solver_failed"})
+
+
+def _suggest(value: Any) -> dict[str, Any]:
+    return {"suggested_value": str(value or "")}
+
+
+def _login_fields(
+    defaults: Mapping[str, Any] | None = None, *, required: bool
+) -> dict[Any, Any]:
+    """Email, password and the origin header: the fields a login needs."""
 
     defaults = defaults or {}
-
-    def default(key: str) -> str:
-        return str(defaults.get(key) or "")
-
+    marker = schema.Required if required else schema.Optional
+    extra: dict[str, Any] = {} if required else {"default": ""}
     return {
-        schema.Optional(CONF_EMAIL, default=default(CONF_EMAIL)): selector.TextSelector(
+        marker(
+            CONF_EMAIL, description=_suggest(defaults.get(CONF_EMAIL)), **extra
+        ): selector.TextSelector(
             selector.TextSelectorConfig(type=selector.TextSelectorType.EMAIL)
         ),
-        schema.Optional(CONF_PASSWORD, default=""): selector.TextSelector(
+        marker(CONF_PASSWORD, **extra): selector.TextSelector(
             selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
         ),
         schema.Optional(
-            CONF_TOTP_SECRET, default=default(CONF_TOTP_SECRET)
-        ): selector.TextSelector(
-            selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
-        ),
-        schema.Optional(
             CONF_ORIGIN,
-            default=default(CONF_ORIGIN) or DEFAULT_ORIGIN,
+            default=str(defaults.get(CONF_ORIGIN) or DEFAULT_ORIGIN),
             description={"advanced": True},
         ): selector.TextSelector(
             selector.TextSelectorConfig(type=selector.TextSelectorType.URL)
         ),
+    }
+
+
+async def _async_probe_solver(session: ClientSession, base: str) -> str | None:
+    """Return the FlareSolverr API address at ``base`` if one answers there."""
+
+    try:
+        async with session.get(
+            f"{base}/", timeout=ClientTimeout(total=SOLVER_PROBE_TIMEOUT)
+        ) as resp:
+            payload = await resp.json(content_type=None)
+    except (ClientError, TimeoutError, ValueError):
+        return None
+    if isinstance(payload, dict) and "FlareSolverr" in str(payload.get("msg", "")):
+        return f"{base}/v1"
+    return None
+
+
+async def _async_discover_solver(hass: HomeAssistant) -> str:
+    """Suggest where FlareSolverr is running, or "" when nothing answers.
+
+    Probes a short fixed list in parallel with a short timeout. A probe that
+    fails for any reason is simply a no, so this can never fail the flow. The
+    shared session is fine here: these requests carry no Mozillion cookies.
+    """
+
+    session = async_get_clientsession(hass)
+    found = await asyncio.gather(
+        *(_async_probe_solver(session, base) for base in SOLVER_CANDIDATES)
+    )
+    return next((url for url in found if url), "")
+
+
+def _solver_field(default: str = "") -> dict[Any, Any]:
+    """The FlareSolverr address, offered once Cloudflare has blocked a login."""
+
+    return {
         schema.Optional(
-            CONF_SESSION_COOKIE,
-            default="",
-            description={"advanced": True},
+            CONF_FLARESOLVERR_URL, description=_suggest(default)
+        ): selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.URL)
+        )
+    }
+
+
+def _session_fields(*, required: bool, advanced: bool) -> dict[Any, Any]:
+    """The cookie header and XSRF token copied from a signed-in browser."""
+
+    marker = schema.Required if required else schema.Optional
+    extra: dict[str, Any] = {} if required else {"default": ""}
+    description = {"advanced": advanced}
+    return {
+        marker(
+            CONF_SESSION_COOKIE, description=description, **extra
         ): selector.TextSelector(
             selector.TextSelectorConfig(
                 type=selector.TextSelectorType.TEXT, multiline=True
             )
         ),
         schema.Optional(
-            CONF_XSRF_TOKEN,
-            default="",
-            description={"advanced": True},
+            CONF_XSRF_TOKEN, default="", description=description
         ): selector.TextSelector(
             selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
         ),
     }
+
+
+def _scan_interval_field() -> dict[Any, Any]:
+    return {
+        schema.Optional(
+            CONF_SCAN_INTERVAL,
+            default=DEFAULT_SCAN_INTERVAL,
+            description={"advanced": True},
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                mode=selector.NumberSelectorMode.BOX, min=MIN_SCAN_INTERVAL
+            )
+        )
+    }
+
+
+def _totp_schema() -> Any:
+    """The 2FA form: the Base32 secret, or the otpauth:// link, from the QR code.
+
+    The integration keeps it and generates a fresh code on every sign-in, so the
+    user never types a code.
+    """
+
+    return schema.Schema(
+        {
+            schema.Required(CONF_TOTP_SECRET): selector.TextSelector(
+                selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+            )
+        }
+    )
 
 
 async def _async_authenticate(
@@ -153,6 +250,34 @@ async def _async_authenticate(
         raise ValueError("missing_auth")
 
     return data
+
+
+async def _async_try_login(
+    client: MozillionClient, data: dict[str, Any]
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Run the login, returning the session or the error key to show."""
+
+    try:
+        return await _async_authenticate(client, data), None
+    except ValueError:
+        return None, "missing_auth"
+    except MozillionTwoFactorRequired:
+        return None, "two_factor_required"
+    except (MozillionTotpSecretError, MozillionTwoFactorRejected):
+        return None, "invalid_totp"
+    except MozillionSolverError:
+        _LOGGER.exception("FlareSolverr could not clear the challenge")
+        return None, "solver_failed"
+    except MozillionChallengeError:
+        return None, "cloudflare_blocked"
+    # After the 2FA errors: a rejected password is a wrong password, not an
+    # unreachable server.
+    except MozillionAuthError:
+        _LOGGER.debug("Mozillion rejected the credentials")
+        return None, "invalid_auth"
+    except RuntimeError:
+        _LOGGER.exception("Login failed")
+        return None, "cannot_connect"
 
 
 def _sim_subentry_data(sim: MozillionSim) -> dict[str, Any]:
@@ -243,6 +368,15 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
         """Initialize config flow."""
         super().__init__()
         self._credentials: dict[str, Any] = {}
+        # Email, password and the advanced fields, held while the TOTP step runs.
+        self._pending: dict[str, Any] = {}
+        # Set once Cloudflare blocks a login: the sign-in form then also offers a
+        # FlareSolverr address, which is hidden until it is relevant.
+        self._show_solver = False
+        # An address that answered when Cloudflare first blocked us; only suggested.
+        self._solver_suggestion = ""
+        # Which sign-in form the user picked: "credentials" or "session".
+        self._mode = "credentials"
         self._sims: list[MozillionSim] = []
         self._cookie_header: str | None = None
         self._xsrf_token: str | None = None
@@ -275,71 +409,194 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Collect the account credentials and find its SIMs."""
+        """Choose how to sign in: email and password, or a browser session."""
 
-        errors: dict[str, str] = {}
+        return self.async_show_menu(
+            step_id="user", menu_options=["credentials", "session"]
+        )
 
+    async def async_step_credentials(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Sign in with email and password.
+
+        2FA is not asked up front: it is requested only if Mozillion's login
+        actually answers with a 2FA challenge (``async_step_totp``).
+        """
+
+        self._mode = "credentials"
         if user_input is not None:
-            client = self._async_client()
-            try:
-                data = await _async_authenticate(client, dict(user_input))
-            except ValueError:
-                errors["base"] = "missing_auth"
-            # Before RuntimeError: MozillionAuthError subclasses it, and a rejected
-            # password is a wrong password, not an unreachable server.
-            except MozillionAuthError:
-                _LOGGER.debug(
-                    "Mozillion rejected the credentials entered in the user step"
-                )
-                errors["base"] = "invalid_auth"
-            except RuntimeError:
-                _LOGGER.exception("Login failed during user step")
-                errors["base"] = "cannot_connect"
+            self._pending = dict(user_input)
+            return await self._async_login("user", self._pending)
+        return self._main_form("user", {})
+
+    async def async_step_session(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Sign in with the cookie header and XSRF token from a browser."""
+
+        self._mode = "session"
+        if user_input is not None:
+            self._pending = dict(user_input)
+            return await self._async_login("user", self._pending)
+        return self._main_form("user", {})
+
+    async def async_step_totp(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Collect the 2FA secret once Mozillion has asked for it."""
+
+        return await self._async_totp_step("user", user_input)
+
+    # -- shared by setup, reauth and reconfigure ---------------------------
+
+    def _entry_for(self, kind: str) -> ConfigEntry:
+        if kind == "reauth":
+            return self._get_reauth_entry()
+        return self._reconfigure_entry or self._get_reconfigure_entry()
+
+    async def _async_totp_step(
+        self, kind: str, user_input: dict[str, Any] | None
+    ) -> config_entries.ConfigFlowResult:
+        if user_input is not None:
+            return await self._async_login(
+                kind, {**self._pending, **user_input}, from_totp=True
+            )
+        return self._totp_form(kind, {})
+
+    def _main_form(
+        self, kind: str, errors: dict[str, str]
+    ) -> config_entries.ConfigFlowResult:
+        if kind == "user":
+            if self._mode == "session":
+                step_id = "session"
+                fields = _session_fields(required=True, advanced=False)
             else:
-                # One entry per account: further SIMs are added to this one.
-                email = str(data.get(CONF_EMAIL) or "").strip().lower()
-                if email:
-                    await self.async_set_unique_id(email)
-                    self._abort_if_unique_id_configured()
-
-                self._credentials = data
-                self._cookie_header = data.get(CONF_SESSION_COOKIE)
-                self._xsrf_token = data.get(CONF_XSRF_TOKEN)
-
-                try:
-                    self._sims = await client.async_fetch_sims(
-                        cookie_header=self._cookie_header or "",
-                        xsrf_token=self._xsrf_token,
+                step_id = "credentials"
+                fields = _login_fields(self._pending, required=True)
+                if self._show_solver:
+                    fields.update(
+                        _solver_field(
+                            self._pending.get(CONF_FLARESOLVERR_URL, "")
+                            or self._solver_suggestion
+                        )
                     )
-                except RuntimeError:
-                    _LOGGER.exception(
-                        "Failed to fetch the SIM list; falling back to manual entry"
-                    )
-                    self._sims = []
+            return self.async_show_form(
+                step_id=step_id,
+                data_schema=schema.Schema({**fields, **_scan_interval_field()}),
+                errors=errors,
+            )
 
-                if self._sims:
-                    return await self.async_step_select_sim()
-                return await self.async_step_manual_ids()
-
+        entry = self._entry_for(kind)
+        stored = str(entry.data.get(CONF_FLARESOLVERR_URL) or "")
         return self.async_show_form(
-            step_id="user",
+            step_id=f"{kind}_confirm",
             data_schema=schema.Schema(
                 {
-                    **_credentials_schema(),
-                    schema.Optional(
-                        CONF_SCAN_INTERVAL,
-                        default=DEFAULT_SCAN_INTERVAL,
-                        description={"advanced": True},
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            mode=selector.NumberSelectorMode.BOX,
-                            min=MIN_SCAN_INTERVAL,
-                        )
+                    **_login_fields(entry.data, required=False),
+                    **(
+                        _solver_field(stored or self._solver_suggestion)
+                        if self._show_solver or stored
+                        else {}
                     ),
+                    **_session_fields(required=False, advanced=True),
                 }
             ),
             errors=errors,
         )
+
+    def _totp_form(
+        self, kind: str, errors: dict[str, str]
+    ) -> config_entries.ConfigFlowResult:
+        return self.async_show_form(
+            step_id="totp" if kind == "user" else f"{kind}_totp",
+            data_schema=_totp_schema(),
+            errors=errors,
+        )
+
+    async def _async_try_login(
+        self, data: dict[str, Any]
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        """Run the login, returning the session or the error key to show."""
+
+        return await _async_try_login(self._async_client(), data)
+
+    async def _async_login(
+        self, kind: str, data: dict[str, Any], *, from_totp: bool = False
+    ) -> config_entries.ConfigFlowResult:
+        """Log in, ask for the 2FA secret only if needed, then finish the flow."""
+
+        data = dict(data)
+        if kind != "user":
+            # Reuse what is stored so a routine reauth never asks for it again.
+            stored = self._entry_for(kind).data
+            data.setdefault(CONF_TOTP_SECRET, stored.get(CONF_TOTP_SECRET, ""))
+            data.setdefault(
+                CONF_FLARESOLVERR_URL, stored.get(CONF_FLARESOLVERR_URL, "")
+            )
+        solver = str(data.get(CONF_FLARESOLVERR_URL) or "").strip()
+        data[CONF_FLARESOLVERR_URL] = solver
+        self._async_client().flaresolverr_url = solver or None
+
+        result, error = await self._async_try_login(data)
+        if error in _TOTP_ERRORS:
+            return self._totp_form(
+                kind, {} if error == "two_factor_required" else {"base": error}
+            )
+        if error in _BLOCKED_ERRORS:
+            # Not a credential problem, so go back to the form that can fix it.
+            await self._async_flag_blocked(data)
+            return self._main_form(kind, {"base": error})
+        if error or result is None:
+            errors = {"base": error or "cannot_connect"}
+            if from_totp:
+                return self._totp_form(kind, errors)
+            return self._main_form(kind, errors)
+
+        if kind == "user":
+            return await self._async_continue_setup(result)
+        return await self._async_save_entry(kind, result)
+
+    async def _async_flag_blocked(self, data: dict[str, Any]) -> None:
+        """Reveal the FlareSolverr field, suggesting an address the first time."""
+
+        if not self._show_solver and not data.get(CONF_FLARESOLVERR_URL):
+            self._solver_suggestion = await _async_discover_solver(self.hass)
+        self._show_solver = True
+
+    async def _async_continue_setup(
+        self, data: dict[str, Any]
+    ) -> config_entries.ConfigFlowResult:
+        """The account is authenticated: find its SIMs."""
+
+        # One entry per account: further SIMs are added to this one.
+        email = str(data.get(CONF_EMAIL) or "").strip().lower()
+        if email:
+            await self.async_set_unique_id(email)
+            self._abort_if_unique_id_configured()
+
+        self._credentials = data
+        self._cookie_header = data.get(CONF_SESSION_COOKIE)
+        self._xsrf_token = data.get(CONF_XSRF_TOKEN)
+
+        try:
+            self._sims = await self._async_client().async_fetch_sims(
+                cookie_header=self._cookie_header or "",
+                xsrf_token=self._xsrf_token,
+            )
+        except MozillionChallengeError:
+            if self._mode == "credentials":
+                await self._async_flag_blocked(data)
+            return self._main_form("user", {"base": "cloudflare_blocked"})
+        except RuntimeError:
+            _LOGGER.exception(
+                "Failed to fetch the SIM list; falling back to manual entry"
+            )
+            self._sims = []
+
+        if self._sims:
+            return await self.async_step_select_sim()
+        return await self.async_step_manual_ids()
 
     async def async_step_select_sim(
         self, user_input: dict[str, Any] | None = None
@@ -468,52 +725,17 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> config_entries.ConfigFlowResult:
         """Collect fresh credentials or a fresh session cookie."""
 
-        errors: dict[str, str] = {}
-        existing = self._get_reauth_entry()
-
         if user_input is not None:
-            client = self._async_client()
-            try:
-                updated = await _async_authenticate(client, dict(user_input))
-            except ValueError:
-                errors["base"] = "missing_auth"
-            # Before RuntimeError, which MozillionAuthError subclasses: the password
-            # was rejected rather than the connection failing.
-            except MozillionAuthError:
-                _LOGGER.debug(
-                    "Mozillion rejected the credentials entered during reauth"
-                )
-                errors["base"] = "invalid_auth"
-            except RuntimeError:
-                _LOGGER.exception("Reauth login failed")
-                errors["base"] = "cannot_connect"
-            else:
-                new_data = {
-                    **existing.data,
-                    CONF_EMAIL: updated.get(CONF_EMAIL)
-                    or existing.data.get(CONF_EMAIL, ""),
-                    CONF_PASSWORD: updated.get(CONF_PASSWORD)
-                    or existing.data.get(CONF_PASSWORD, ""),
-                    CONF_TOTP_SECRET: updated.get(CONF_TOTP_SECRET)
-                    or existing.data.get(CONF_TOTP_SECRET, ""),
-                    CONF_ORIGIN: updated.get(CONF_ORIGIN)
-                    or existing.data.get(CONF_ORIGIN, DEFAULT_ORIGIN),
-                    CONF_SESSION_COOKIE: updated.get(CONF_SESSION_COOKIE, ""),
-                    CONF_XSRF_TOKEN: updated.get(CONF_XSRF_TOKEN, ""),
-                }
-                if await self._async_validate_entry(client, existing, new_data):
-                    return self.async_update_reload_and_abort(
-                        existing,
-                        data=new_data,
-                        reason="reauth_successful",
-                    )
-                errors["base"] = "cannot_connect"
+            self._pending = dict(user_input)
+            return await self._async_login("reauth", self._pending)
+        return self._main_form("reauth", {})
 
-        return self.async_show_form(
-            step_id="reauth_confirm",
-            data_schema=schema.Schema(_credentials_schema(existing.data)),
-            errors=errors,
-        )
+    async def async_step_reauth_totp(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Collect a new 2FA secret when the stored one no longer works."""
+
+        return await self._async_totp_step("reauth", user_input)
 
     async def async_step_reconfigure(
         self, entry_data: Mapping[str, Any]
@@ -528,52 +750,48 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> config_entries.ConfigFlowResult:
         """Re-authenticate the account. SIMs are changed on their own subentry."""
 
-        entry = self._reconfigure_entry or self._get_reconfigure_entry()
-        errors: dict[str, str] = {}
-
         if user_input is not None:
-            client = self._async_client()
-            try:
-                data = await _async_authenticate(client, dict(user_input))
-            except ValueError:
-                errors["base"] = "missing_auth"
-            # Before RuntimeError, which MozillionAuthError subclasses: the password
-            # was rejected rather than the connection failing.
-            except MozillionAuthError:
-                _LOGGER.debug(
-                    "Mozillion rejected the credentials entered during reconfigure"
-                )
-                errors["base"] = "invalid_auth"
-            except RuntimeError:
-                _LOGGER.exception("Reconfigure login failed")
-                errors["base"] = "cannot_connect"
-            else:
-                new_data = {
-                    **entry.data,
-                    CONF_EMAIL: data.get(CONF_EMAIL) or entry.data.get(CONF_EMAIL, ""),
-                    CONF_PASSWORD: data.get(CONF_PASSWORD)
-                    or entry.data.get(CONF_PASSWORD, ""),
-                    CONF_TOTP_SECRET: data.get(CONF_TOTP_SECRET)
-                    or entry.data.get(CONF_TOTP_SECRET, ""),
-                    CONF_ORIGIN: data.get(CONF_ORIGIN)
-                    or entry.data.get(CONF_ORIGIN, DEFAULT_ORIGIN),
-                    CONF_SESSION_COOKIE: data.get(CONF_SESSION_COOKIE, ""),
-                    CONF_XSRF_TOKEN: data.get(CONF_XSRF_TOKEN, ""),
-                }
-                if await self._async_validate_entry(client, entry, new_data):
-                    if entry.version != self.VERSION:
-                        self.hass.config_entries.async_update_entry(
-                            entry, version=self.VERSION
-                        )
-                    return self.async_update_reload_and_abort(
-                        entry, data=new_data, title=_account_title(new_data)
-                    )
-                errors["base"] = "cannot_connect"
+            self._pending = dict(user_input)
+            return await self._async_login("reconfigure", self._pending)
+        return self._main_form("reconfigure", {})
 
-        return self.async_show_form(
-            step_id="reconfigure_confirm",
-            data_schema=schema.Schema(_credentials_schema(entry.data)),
-            errors=errors,
+    async def async_step_reconfigure_totp(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Collect a new 2FA secret when the stored one no longer works."""
+
+        return await self._async_totp_step("reconfigure", user_input)
+
+    async def _async_save_entry(
+        self, kind: str, updated: dict[str, Any]
+    ) -> config_entries.ConfigFlowResult:
+        """Validate the new session against a SIM, then update the entry."""
+
+        entry = self._entry_for(kind)
+        new_data = {
+            **entry.data,
+            CONF_EMAIL: updated.get(CONF_EMAIL) or entry.data.get(CONF_EMAIL, ""),
+            CONF_PASSWORD: updated.get(CONF_PASSWORD)
+            or entry.data.get(CONF_PASSWORD, ""),
+            CONF_TOTP_SECRET: updated.get(CONF_TOTP_SECRET)
+            or entry.data.get(CONF_TOTP_SECRET, ""),
+            CONF_ORIGIN: updated.get(CONF_ORIGIN)
+            or entry.data.get(CONF_ORIGIN, DEFAULT_ORIGIN),
+            CONF_FLARESOLVERR_URL: updated.get(CONF_FLARESOLVERR_URL, ""),
+            CONF_SESSION_COOKIE: updated.get(CONF_SESSION_COOKIE, ""),
+            CONF_XSRF_TOKEN: updated.get(CONF_XSRF_TOKEN, ""),
+        }
+        if not await self._async_validate_entry(self._async_client(), entry, new_data):
+            return self._main_form(kind, {"base": "cannot_connect"})
+
+        if kind == "reauth":
+            return self.async_update_reload_and_abort(
+                entry, data=new_data, reason="reauth_successful"
+            )
+        if entry.version != self.VERSION:
+            self.hass.config_entries.async_update_entry(entry, version=self.VERSION)
+        return self.async_update_reload_and_abort(
+            entry, data=new_data, title=_account_title(new_data)
         )
 
     async def _async_validate_entry(
@@ -612,7 +830,9 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> config_entries.ConfigFlowResult:
         """Handle import from configuration.yaml."""
 
-        return await self.async_step_user(user_input)
+        self._pending = dict(user_input)
+        self._mode = "credentials" if user_input.get(CONF_EMAIL) else "session"
+        return await self._async_login("user", self._pending)
 
     @staticmethod
     @callback
@@ -636,7 +856,9 @@ class SimSubentryFlowHandler(ConfigSubentryFlow):
         """Return this flow's client, building its session on first use."""
 
         if self._client is None:
-            self._client = _dedicated_client(self.hass)
+            self._client = _dedicated_client(
+                self.hass, self._get_entry().data.get(CONF_FLARESOLVERR_URL)
+            )
         return self._client
 
     async def async_step_user(
@@ -798,34 +1020,89 @@ def _account_title(data: Mapping[str, Any]) -> str:
 
 
 class MozillionOptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle Mozillion options. The scan interval is account-wide."""
+    """Handle Mozillion options.
+
+    The scan interval is account-wide. For an account that signs in with a
+    password, the 2FA secret and the FlareSolverr address can be changed here too,
+    without going back through reconfigure. A change is only saved once a login
+    with the new values has worked.
+    """
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Manage the polling interval."""
+        """Manage the polling interval, the 2FA secret and the solver address."""
+
+        entry = self.config_entry
+        can_login = has_credentials(entry)
+        stored_secret = str(entry.data.get(CONF_TOTP_SECRET) or "")
+        stored_solver = str(entry.data.get(CONF_FLARESOLVERR_URL) or "")
+        errors: dict[str, str] = {}
 
         if user_input is not None:
-            return self.async_create_entry(title="Options", data=user_input)
+            # A cleared optional field is omitted from the submission, and the
+            # form always pre-fills what is stored, so absent means "cleared".
+            secret = str(user_input.get(CONF_TOTP_SECRET) or "").strip()
+            solver = str(user_input.get(CONF_FLARESOLVERR_URL) or "").strip()
 
-        current = self.config_entry.options.get(
+            if can_login and (secret, solver) != (stored_secret, stored_solver):
+                client = _dedicated_client(self.hass, solver or None)
+                result, error = await _async_try_login(
+                    client,
+                    {
+                        CONF_EMAIL: entry.data[CONF_EMAIL],
+                        CONF_PASSWORD: entry.data[CONF_PASSWORD],
+                        CONF_TOTP_SECRET: secret,
+                        CONF_ORIGIN: entry.data.get(CONF_ORIGIN, DEFAULT_ORIGIN),
+                    },
+                )
+                if error or result is None:
+                    errors["base"] = error or "cannot_connect"
+                else:
+                    # The login that proved the values also produced a session.
+                    self.hass.config_entries.async_update_entry(
+                        entry,
+                        data={
+                            **entry.data,
+                            CONF_TOTP_SECRET: secret,
+                            CONF_FLARESOLVERR_URL: solver,
+                            CONF_SESSION_COOKIE: result[CONF_SESSION_COOKIE],
+                            CONF_XSRF_TOKEN: result.get(CONF_XSRF_TOKEN, ""),
+                        },
+                    )
+
+            if not errors:
+                return self.async_create_entry(
+                    title="Options",
+                    data={CONF_SCAN_INTERVAL: user_input[CONF_SCAN_INTERVAL]},
+                )
+            # Show what the user typed, not what is stored, so a retry keeps it.
+            stored_secret, stored_solver = secret, solver
+
+        current = entry.options.get(
             CONF_SCAN_INTERVAL,
-            self.config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+            entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
         )
 
+        fields: dict[Any, Any] = {
+            # Same floor as the setup form's NumberSelector: below a minute
+            # the poller exhausts Mozillion's request budget and every poll
+            # comes back rate-limited. The bound belongs to the form schema
+            # so a sub-minute value is refused before it can be saved --
+            # Home Assistant answers the dialog with this field's error and
+            # keeps the flow open instead of storing it.
+            schema.Optional(CONF_SCAN_INTERVAL, default=current): schema.All(
+                schema.Coerce(int), schema.Range(min=MIN_SCAN_INTERVAL)
+            )
+        }
+        if can_login:
+            fields[
+                schema.Optional(CONF_TOTP_SECRET, description=_suggest(stored_secret))
+            ] = selector.TextSelector(
+                selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+            )
+            fields.update(_solver_field(stored_solver))
+
         return self.async_show_form(
-            step_id="init",
-            data_schema=schema.Schema(
-                {
-                    # Same floor as the setup form's NumberSelector: below a minute
-                    # the poller exhausts Mozillion's request budget and every poll
-                    # comes back rate-limited. The bound belongs to the form schema
-                    # so a sub-minute value is refused before it can be saved --
-                    # Home Assistant answers the dialog with this field's error and
-                    # keeps the flow open instead of storing it.
-                    schema.Optional(CONF_SCAN_INTERVAL, default=current): schema.All(
-                        schema.Coerce(int), schema.Range(min=MIN_SCAN_INTERVAL)
-                    )
-                }
-            ),
+            step_id="init", data_schema=schema.Schema(fields), errors=errors
         )

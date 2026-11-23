@@ -30,6 +30,7 @@ from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from .api import MozillionAuthError, MozillionClient, MozillionSim, mask_identifier
 from .const import (
     CONF_EMAIL,
+    CONF_FLARESOLVERR_URL,
     CONF_ICCID,
     CONF_ORDER_DETAIL_ID,
     CONF_ORIGIN,
@@ -101,7 +102,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: MozillionConfigEntry) ->
     """Set up the account and one coordinator per SIM."""
 
     session = MozillionSession.from_entry(entry)
-    client = MozillionClient(async_create_clientsession(hass))
+    client = MozillionClient(
+        async_create_clientsession(hass),
+        flaresolverr_url=entry.data.get(CONF_FLARESOLVERR_URL) or None,
+    )
     # One dashboard read for the account, exactly as one session covers its logins:
     # the page carries every SIM, so the coordinators below share the parsed result
     # rather than each downloading it once per refresh window.
@@ -163,9 +167,16 @@ def _subentry_fingerprint(entry: ConfigEntry) -> SubentryFingerprint:
 
 
 def _options_fingerprint(entry: ConfigEntry) -> OptionsFingerprint:
-    """Summarise the entry options the loaded entry was built from."""
+    """Summarise the entry options the loaded entry was built from.
 
-    return tuple(sorted(entry.options.items()))
+    The FlareSolverr address is entry data, but it is baked into the client at
+    setup, so a change to it has to reload just like an option does.
+    """
+
+    return (
+        *sorted(entry.options.items()),
+        (CONF_FLARESOLVERR_URL, entry.data.get(CONF_FLARESOLVERR_URL) or ""),
+    )
 
 
 async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -342,7 +353,10 @@ async def _async_migrate_to_v2(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Re-discover the SIM this entry was created for and rewrite its data."""
 
     data = dict(entry.data)
-    client = MozillionClient(async_create_clientsession(hass))
+    client = MozillionClient(
+        async_create_clientsession(hass),
+        flaresolverr_url=data.get(CONF_FLARESOLVERR_URL) or None,
+    )
 
     cookie_header = data.get(CONF_SESSION_COOKIE) or ""
     xsrf_token = data.get(CONF_XSRF_TOKEN)

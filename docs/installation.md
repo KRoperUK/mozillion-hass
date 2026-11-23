@@ -29,14 +29,26 @@ You need either the first option (recommended) or the second.
 
 ### Option A — email and password
 
-1. Enter your Mozillion **email** and **password**.
-2. If two-factor authentication is enabled on your account, enter the **TOTP
-   secret**. Either paste the Base32 secret itself, or paste the whole
+1. Choose **Email and password** and enter your Mozillion **email** and
+   **password**.
+2. If two-factor authentication is enabled on your account, Mozillion's login
+   says so and you are then asked for the **TOTP secret**. Accounts without 2FA
+   are never asked. Either paste the Base32 secret itself, or paste the whole
    `otpauth://totp/…?secret=…` link that Mozillion's QR code encodes — both work.
    Spaces, dashes and lower-case letters are tolerated.
 
 The integration logs in, answers the 2FA challenge, and refreshes the session on
 its own afterwards.
+
+### If Cloudflare blocks sign-in
+
+If setup reports that Cloudflare is blocking sign-in, the form gains a
+**FlareSolverr address** field. Run
+[FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) on the same network
+as Home Assistant (its README has the container command), enter
+`http://<host>:8191/v1`, and submit again. See
+[Troubleshooting](TROUBLESHOOTING.md#cloudflare-is-blocking-sign-in-from-this-network)
+for the details and the browser-session alternative.
 
 ### Option B — session cookie
 
@@ -54,7 +66,8 @@ asked to re-authenticate. Prefer Option A if you want unattended operation.
 | --- | --- | --- |
 | Email | With Option A | Mozillion account email |
 | Password | With Option A | Mozillion account password |
-| TOTP secret | If 2FA is on | Base32 secret or a full `otpauth://` link |
+| TOTP secret | Asked only if 2FA is on | Base32 secret or a full `otpauth://` link |
+| FlareSolverr address | Only if Cloudflare blocks sign-in | e.g. `http://flaresolverr:8191/v1` |
 | Origin header | No | Advanced. Overrides the `Origin` sent when logging in |
 | Cookie header | With Option B | Advanced. Full browser cookie string |
 | XSRF token header | No | Advanced. Decoded `XSRF-TOKEN` cookie value |

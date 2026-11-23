@@ -3,15 +3,37 @@
     "step": {
       "user": {
         "title": "Mozillion",
-        "description": "Connect to Mozillion to fetch data usage.",
+        "description": "How do you want to sign in? Choose the browser session if Mozillion blocks automated sign-in.",
+        "menu_options": {
+          "credentials": "Email and password",
+          "session": "Browser session cookie"
+        }
+      },
+      "credentials": {
+        "title": "Sign in to Mozillion",
+        "description": "Mozillion will only ask for a two-factor secret next if your account needs one.",
         "data": {
           "email": "Email",
           "password": "Password",
-          "totp_secret": "TOTP secret (Base32, optional)",
           "origin": "Origin header (optional)",
-          "session_cookie": "Cookie header (optional if using login)",
+          "scan_interval": "Scan interval (seconds)",
+          "flaresolverr_url": "FlareSolverr address (e.g. http://flaresolverr:8191/v1)"
+        }
+      },
+      "session": {
+        "title": "Use a browser session",
+        "description": "Sign in to Mozillion in a browser, then copy the Cookie header and XSRF token from its developer tools.",
+        "data": {
+          "session_cookie": "Cookie header",
           "xsrf_token": "XSRF token header (optional)",
           "scan_interval": "Scan interval (seconds)"
+        }
+      },
+      "totp": {
+        "title": "Two-factor secret",
+        "description": "Mozillion asked for a two-factor code. Paste the Base32 secret or the otpauth:// link shown when you set up your authenticator app. The integration keeps it and generates the codes itself.",
+        "data": {
+          "totp_secret": "TOTP secret or otpauth:// link"
         }
       },
       "select_sim": {
@@ -36,9 +58,10 @@
         "data": {
           "email": "Email",
           "password": "Password",
-          "totp_secret": "TOTP secret (Base32, optional)",
           "session_cookie": "Cookie header (optional if using login)",
-          "xsrf_token": "XSRF token header (optional)"
+          "xsrf_token": "XSRF token header (optional)",
+          "origin": "Origin header (optional)",
+          "flaresolverr_url": "FlareSolverr address (e.g. http://flaresolverr:8191/v1)"
         }
       },
       "reconfigure_confirm": {
@@ -47,16 +70,34 @@
         "data": {
           "email": "Email",
           "password": "Password",
-          "totp_secret": "TOTP secret (Base32, optional)",
           "session_cookie": "Cookie header (optional if using login)",
-          "xsrf_token": "XSRF token header (optional)"
+          "xsrf_token": "XSRF token header (optional)",
+          "origin": "Origin header (optional)",
+          "flaresolverr_url": "FlareSolverr address (e.g. http://flaresolverr:8191/v1)"
+        }
+      },
+      "reauth_totp": {
+        "title": "Two-factor secret",
+        "description": "The stored two-factor secret is missing or was rejected. Paste the Base32 secret or otpauth:// link for this account.",
+        "data": {
+          "totp_secret": "TOTP secret or otpauth:// link"
+        }
+      },
+      "reconfigure_totp": {
+        "title": "Two-factor secret",
+        "description": "The stored two-factor secret is missing or was rejected. Paste the Base32 secret or otpauth:// link for this account.",
+        "data": {
+          "totp_secret": "TOTP secret or otpauth:// link"
         }
       }
     },
     "error": {
       "cannot_connect": "Cannot connect. Check your credentials, cookie header and that the SIM is still on your account.",
-      "invalid_auth": "Mozillion rejected those credentials. Check the email, password and TOTP secret, then try again.",
-      "missing_auth": "Provide either email+password (and optional TOTP) or a cookie header."
+      "invalid_auth": "Mozillion rejected that email or password.",
+      "missing_auth": "Enter an email and password, or a cookie header.",
+      "invalid_totp": "Mozillion rejected the two-factor secret. Paste the Base32 secret or otpauth:// link again.",
+      "cloudflare_blocked": "Cloudflare is blocking sign-in from this network. Enter your FlareSolverr address below, or start again and use the browser session option.",
+      "solver_failed": "FlareSolverr could not clear Cloudflare's challenge. Check the address, and that it runs on the same network as Home Assistant."
     },
     "abort": {
       "reauth_successful": "Re-authentication successful.",
@@ -111,9 +152,21 @@
       "init": {
         "title": "Mozillion options",
         "data": {
-          "scan_interval": "Scan interval (seconds)"
-        }
+          "scan_interval": "Scan interval (seconds)",
+          "totp_secret": "TOTP secret or otpauth:// link",
+          "flaresolverr_url": "FlareSolverr address (e.g. http://flaresolverr:8191/v1)"
+        },
+        "description": "For an account that signs in with a password, a changed 2FA secret or FlareSolverr address is tested with a real sign-in before it is saved. Clear a field to remove it."
       }
+    },
+    "error": {
+      "invalid_auth": "Mozillion rejected the stored email or password. Use Reconfigure to change them.",
+      "invalid_totp": "Mozillion rejected the two-factor secret. Paste the Base32 secret or otpauth:// link again.",
+      "missing_auth": "This account has no stored email and password to test with.",
+      "cloudflare_blocked": "Cloudflare is blocking sign-in from this network. Add a FlareSolverr address, or check the one entered.",
+      "solver_failed": "FlareSolverr could not clear Cloudflare's challenge. Check the address, and that it runs on the same network as Home Assistant.",
+      "cannot_connect": "Cannot connect to Mozillion. Check the network and try again.",
+      "two_factor_required": "Mozillion asked for a two-factor code. Enter the TOTP secret or otpauth:// link."
     }
   },
   "entity": {
@@ -159,6 +212,30 @@
     "dashboard_unreadable": {
       "title": "Mozillion dashboard cannot be read",
       "description": "The dashboard for {entry} could not be read for {attempts} consecutive polls, so the plan, service status and reset date are unavailable.\n\nLast error: {error}\n\nThis usually means Mozillion has changed their page markup, though a login or network problem looks the same. Data usage itself is unaffected."
+    },
+    "cloudflare_blocked": {
+      "title": "Cloudflare is blocking Mozillion",
+      "fix_flow": {
+        "step": {
+          "solver": {
+            "title": "Clear Cloudflare's challenge",
+            "description": "Cloudflare is blocking {entry}, so data usage cannot be read.\n\nLast error: {error}\n\nEnter the address of a FlareSolverr running on the same network as Home Assistant, for example http://flaresolverr:8191/v1. It is tested before it is saved.",
+            "data": {
+              "flaresolverr_url": "FlareSolverr address"
+            }
+          }
+        },
+        "error": {
+          "solver_failed": "FlareSolverr could not clear Cloudflare's challenge. Check the address, and that it runs on the same network as Home Assistant."
+        },
+        "abort": {
+          "entry_missing": "This Mozillion account no longer exists."
+        }
+      }
+    },
+    "cloudflare_blocked_cookie": {
+      "title": "Cloudflare is blocking Mozillion",
+      "description": "Cloudflare is blocking {entry}, so data usage cannot be read.\n\nLast error: {error}\n\nThis account signs in with a browser session, which cannot clear the challenge itself. Open the integration, choose Reconfigure, and paste a fresh cookie header from a browser that can reach Mozillion. To avoid this in future, reconfigure with your email and password and set up FlareSolverr."
     }
   }
 }

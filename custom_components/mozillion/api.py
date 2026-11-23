@@ -14,24 +14,27 @@ import base64
 import binascii
 import logging
 import re
+import time
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 import pyotp
-from aiohttp import ClientError, ClientResponse, ClientSession
+from aiohttp import ClientError, ClientResponse, ClientSession, ClientTimeout
 from yarl import URL
 
 from .const import (
     BASE_URL,
     CHECK_BALANCE_PATH,
+    CLEARANCE_REFRESH_MARGIN,
     DASHBOARD_PATH,
     DATA_USAGE_PATH,
     DATA_USAGE_STATUS_PATH,
     DEFAULT_ORIGIN,
     LOGIN_PATH,
     LOGIN_POST_PATH,
+    SOLVER_TIMEOUT,
     TWO_FACTOR_PATH,
     USAGE_POLL_ATTEMPTS,
     USAGE_POLL_DELAY,
@@ -46,6 +49,31 @@ _USAGE_DONE_STATUSES = ("success", "completed")
 
 class MozillionAuthError(RuntimeError):
     """Raised when the session is no longer authenticated (cookie/token expired)."""
+
+
+class MozillionChallengeError(RuntimeError):
+    """Cloudflare answered with a bot challenge instead of the Mozillion page.
+
+    Not an authentication failure: the session may be perfectly good, so it must
+    never send the user through reauth. A solver (FlareSolverr) or a session
+    copied from a browser that already passed the challenge gets past it.
+    """
+
+
+class MozillionSolverError(MozillionChallengeError):
+    """FlareSolverr was configured but could not clear the challenge."""
+
+
+class MozillionTwoFactorRequired(RuntimeError):
+    """Login reached Mozillion's 2FA page and no TOTP secret was supplied."""
+
+
+class MozillionTotpSecretError(RuntimeError):
+    """The TOTP secret supplied cannot be read (not Base32 or an otpauth link)."""
+
+
+class MozillionTwoFactorRejected(MozillionAuthError):
+    """Mozillion rejected the generated TOTP code, so the secret is wrong."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,8 +132,24 @@ class MozillionSim:
 class MozillionClient:
     """Thin wrapper around the Mozillion website endpoints."""
 
-    def __init__(self, session: ClientSession) -> None:
+    def __init__(
+        self, session: ClientSession, *, flaresolverr_url: str | None = None
+    ) -> None:
         self._session = session
+        # Public so a config flow can set it after the user supplies one.
+        self.flaresolverr_url = flaresolverr_url
+        # Cloudflare ties its clearance cookie to the User-Agent that earned it,
+        # so after a solve every request must present the solver's browser UA.
+        self._user_agent = USER_AGENT
+        # Epoch seconds at which the solver's cf_clearance stops working, or
+        # None when unknown (no solve yet, or a session cookie with no expiry).
+        self.clearance_expires_at: float | None = None
+
+    @property
+    def has_solver(self) -> bool:
+        """Return True when a FlareSolverr endpoint is configured."""
+
+        return bool(self.flaresolverr_url)
 
     # ------------------------------------------------------------------
     # Authentication
@@ -123,6 +167,35 @@ class MozillionClient:
         Returns ``(cookie_header, xsrf_header)``.
         """
 
+        if self.flaresolverr_url and self._clearance_expiring():
+            try:
+                await self.async_solve_challenge(origin)
+            except MozillionSolverError as err:
+                # The login may still work on the old clearance, so do not fail it
+                # here. Forget the expiry so a broken solver is not retried on
+                # every poll; the reactive path below takes over if Cloudflare
+                # does challenge.
+                _LOGGER.warning("Could not renew the Cloudflare clearance: %s", err)
+                self.clearance_expires_at = None
+
+        try:
+            return await self._async_login_once(email, password, totp_secret, origin)
+        except MozillionChallengeError:
+            if not self.flaresolverr_url:
+                raise
+            _LOGGER.debug("Cloudflare challenge on login; asking FlareSolverr")
+            await self.async_solve_challenge(origin)
+            return await self._async_login_once(email, password, totp_secret, origin)
+
+    async def _async_login_once(
+        self,
+        email: str,
+        password: str,
+        totp_secret: str | None,
+        origin: str,
+    ) -> tuple[str, str | None]:
+        """One login attempt, with no challenge handling."""
+
         # Deliberately no email: debug logs get pasted into public bug reports,
         # and the account is already known from the entry.
         _LOGGER.debug("Starting login (totp=%s)", bool(totp_secret))
@@ -138,7 +211,7 @@ class MozillionClient:
 
         if "/2fa" in final_url:
             if totp is None:
-                raise RuntimeError(
+                raise MozillionTwoFactorRequired(
                     "Mozillion asked for a 2FA code but no TOTP secret is "
                     "configured. Add the Base32 secret to the integration."
                 )
@@ -164,14 +237,80 @@ class MozillionClient:
         )
         return cookie_header, xsrf
 
+    def _clearance_expiring(self) -> bool:
+        """Return True once the clearance is within the refresh margin of expiry."""
+
+        return (
+            self.clearance_expires_at is not None
+            and time.time() > self.clearance_expires_at - CLEARANCE_REFRESH_MARGIN
+        )
+
+    async def async_solve_challenge(self, origin: str) -> None:
+        """Clear Cloudflare's challenge through FlareSolverr.
+
+        FlareSolverr drives a real browser to the login page. Its cookies
+        (notably ``cf_clearance``) go into this client's jar and its User-Agent
+        becomes ours, which is what lets plain HTTP requests through afterwards.
+        The clearance is bound to the IP it was earned from, so FlareSolverr has
+        to egress through the same address as Home Assistant.
+        """
+
+        endpoint = str(self.flaresolverr_url)
+        try:
+            async with self._session.post(
+                endpoint,
+                json={
+                    "cmd": "request.get",
+                    "url": f"{BASE_URL}{LOGIN_PATH}",
+                    "maxTimeout": SOLVER_TIMEOUT * 1000,
+                },
+                timeout=ClientTimeout(total=SOLVER_TIMEOUT + 30),
+            ) as resp:
+                payload = await resp.json(content_type=None)
+        except (ClientError, TimeoutError, ValueError) as err:
+            raise MozillionSolverError(
+                f"Could not reach FlareSolverr at {endpoint}: {err}"
+            ) from err
+
+        solution = payload.get("solution") if isinstance(payload, dict) else None
+        if (
+            not isinstance(payload, dict)
+            or payload.get("status") != "ok"
+            or not isinstance(solution, dict)
+        ):
+            message = payload.get("message") if isinstance(payload, dict) else payload
+            raise MozillionSolverError(
+                f"FlareSolverr could not clear Cloudflare's challenge: {message}"
+            )
+
+        cookies = solution.get("cookies") or []
+        if not any(c.get("name") == "cf_clearance" for c in cookies):
+            raise MozillionSolverError(
+                "FlareSolverr finished without a cf_clearance cookie"
+            )
+        clearance = next(c for c in cookies if c.get("name") == "cf_clearance")
+        # FlareSolverr names the field "expiry" (as Selenium does), and older
+        # builds "expires"; either may be -1 or absent for a session cookie.
+        expires = clearance.get("expiry", clearance.get("expires"))
+        self.clearance_expires_at = (
+            float(expires) if isinstance(expires, int | float) and expires > 0 else None
+        )
+        for cookie in cookies:
+            self._session.cookie_jar.update_cookies(
+                {cookie["name"]: cookie["value"]}, URL(origin)
+            )
+        if solution.get("userAgent"):
+            self._user_agent = str(solution["userAgent"])
+
     async def _async_fetch_login_token(self, origin: str) -> str:
         """Fetch the login page and return its CSRF token."""
 
         url = f"{BASE_URL}{LOGIN_PATH}"
         try:
             async with self._session.get(
-                url, headers={"Origin": origin, "User-Agent": USER_AGENT}
+                url, headers={"Origin": origin, "User-Agent": self._user_agent}
             ) as resp:
+                _raise_for_challenge(resp)
                 resp.raise_for_status()
                 html = await resp.text()
         except ClientError as err:
@@ -197,7 +336,7 @@ class MozillionClient:
             origin=origin,
         )
         if "/2fa" in final_url:
-            raise MozillionAuthError(
+            raise MozillionTwoFactorRejected(
                 "2FA verification failed - Mozillion rejected the TOTP code"
             )
 
@@ -218,9 +357,10 @@ class MozillionClient:
                     "Content-Type": "application/x-www-form-urlencoded",
                     "Origin": origin,
                     "Referer": referer,
-                    "User-Agent": USER_AGENT,
+                    "User-Agent": self._user_agent,
                 },
             ) as resp:
+                _raise_for_challenge(resp)
                 resp.raise_for_status()
                 return str(resp.url), await resp.text()
         except ClientError as err:
@@ -377,7 +517,7 @@ class MozillionClient:
             "Sec-Fetch-Dest": "document",
             "Sec-Fetch-Mode": "navigate",
             "Sec-Fetch-Site": "same-origin",
-            "User-Agent": USER_AGENT,
+            "User-Agent": self._user_agent,
             "Cookie": cookie_header,
         }
         if xsrf_token:
@@ -396,7 +536,7 @@ class MozillionClient:
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-origin",
-            "User-Agent": USER_AGENT,
+            "User-Agent": self._user_agent,
             "X-Requested-With": "XMLHttpRequest",
             "Cookie": cookie_header,
         }
@@ -409,6 +549,7 @@ class MozillionClient:
 
         try:
             async with self._session.get(url, headers=headers) as resp:
+                _raise_for_challenge(resp)
                 _raise_for_rate_limit(resp)
                 body = await resp.text()
                 # An expired session answers with the login page (200, HTML),
@@ -429,6 +570,7 @@ class MozillionClient:
 
         try:
             async with self._session.get(url, headers=headers, params=params) as resp:
+                _raise_for_challenge(resp)
                 _raise_for_rate_limit(resp)
                 _raise_if_auth_bounce(resp, await resp.text(), expect_json=True)
                 resp.raise_for_status()
@@ -682,6 +824,26 @@ def _raise_for_usage_error(payload: dict[str, Any]) -> None:
         )
 
 
+def _raise_for_challenge(resp: ClientResponse) -> None:
+    """Turn a Cloudflare bot challenge into an error that says what it is.
+
+    Cloudflare answers 403 (or 503) with ``cf-mitigated: challenge``. Left alone,
+    the 403 reads as a rejected session in ``_raise_if_auth_bounce`` and sends a
+    healthy account through reauth, which can never help. Checked before every
+    other classification for that reason.
+    """
+
+    if resp.status not in (403, 503):
+        return
+    if str(resp.headers.get("cf-mitigated", "")).lower() != "challenge":
+        return
+    raise MozillionChallengeError(
+        "Cloudflare is challenging requests from this network (HTTP "
+        f"{resp.status}). Set up FlareSolverr in the integration, or sign in "
+        "with a session copied from a browser."
+    )
+
+
 def _raise_for_rate_limit(resp: ClientResponse) -> None:
     """Turn HTTP 429 into an error that says what to do about it.
 
@@ -762,7 +924,7 @@ def _build_totp(secret: str) -> pyotp.TOTP:
     try:
         base64.b32decode(normalised, casefold=True)
     except (binascii.Error, ValueError) as err:
-        raise RuntimeError(
+        raise MozillionTotpSecretError(
             "The TOTP secret is not valid Base32. Paste the secret shown by "
             "Mozillion, or the whole otpauth:// link it gives you."
         ) from err
@@ -780,7 +942,7 @@ def _normalise_totp_secret(secret: str) -> str:
 
     value = re.sub(r"[\s-]", "", value).upper()
     if not value:
-        raise RuntimeError(
+        raise MozillionTotpSecretError(
             "No TOTP secret found. Provide the Base32 secret or the otpauth:// link."
         )
 

@@ -6,9 +6,21 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from custom_components.mozillion.api import MozillionAuthError
+from aiohttp import ClientError
+from custom_components.mozillion.api import (
+    MozillionAuthError,
+    MozillionChallengeError,
+    MozillionSolverError,
+    MozillionTotpSecretError,
+    MozillionTwoFactorRejected,
+    MozillionTwoFactorRequired,
+)
+from custom_components.mozillion.config_flow import (
+    _async_discover_solver as real_discover,
+)
 from custom_components.mozillion.const import (
     CONF_EMAIL,
+    CONF_FLARESOLVERR_URL,
     CONF_ICCID,
     CONF_ORDER_DETAIL_ID,
     CONF_PASSWORD,
@@ -26,7 +38,12 @@ from homeassistant import config_entries, data_entry_flow
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from tests.conftest import MOCK_ENTRY_DATA_COOKIE, MOCK_SIM, _make_config_entry
+from tests.conftest import (
+    MOCK_ENTRY_DATA_COOKIE,
+    MOCK_ENTRY_DATA_LOGIN,
+    MOCK_SIM,
+    _make_config_entry,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -47,13 +64,21 @@ def _bypass_setup():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _no_solver_discovery():
+    """Keep the flow tests off the network; discovery has its own tests."""
+
+    with patch(
+        "custom_components.mozillion.config_flow._async_discover_solver",
+        new=AsyncMock(return_value=""),
+    ) as discover:
+        yield discover
+
+
 def _login_input(**overrides: Any) -> dict[str, Any]:
     base = {
         CONF_EMAIL: "user@example.com",
         CONF_PASSWORD: "secret123",
-        CONF_TOTP_SECRET: "",
-        CONF_SESSION_COOKIE: "",
-        CONF_XSRF_TOKEN: "",
         CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
     }
     base.update(overrides)
@@ -62,9 +87,6 @@ def _login_input(**overrides: Any) -> dict[str, Any]:
 
 def _cookie_input(**overrides: Any) -> dict[str, Any]:
     base = {
-        CONF_EMAIL: "",
-        CONF_PASSWORD: "",
-        CONF_TOTP_SECRET: "",
         CONF_SESSION_COOKIE: "mozillion_session=abc; XSRF-TOKEN=xyz",
         CONF_XSRF_TOKEN: "xyz",
         CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
@@ -100,9 +122,29 @@ def _mock_client(
     return client
 
 
-async def _start_user_flow(hass: HomeAssistant):
-    return await hass.config_entries.flow.async_init(
+async def _submit_login(
+    hass: HomeAssistant, result: Any, data: dict[str, Any], totp: str | None = None
+):
+    """Submit a sign-in form, then the 2FA form when Mozillion asks for one."""
+
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], data)
+    if totp is not None and result["step_id"].endswith("totp"):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_TOTP_SECRET: totp}
+        )
+    return result
+
+
+async def _start_user_flow(hass: HomeAssistant, mode: str | None = "credentials"):
+    """Start the flow and, unless ``mode`` is None, pick a sign-in method."""
+
+    result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    if mode is None:
+        return result
+    return await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": mode}
     )
 
 
@@ -111,12 +153,182 @@ async def _start_user_flow(hass: HomeAssistant):
 # ---------------------------------------------------------------------------
 
 
-async def test_user_form_is_shown_first(hass: HomeAssistant) -> None:
+async def test_user_step_offers_a_choice_of_sign_in_method(
+    hass: HomeAssistant,
+) -> None:
+    result = await _start_user_flow(hass, mode=None)
+
+    assert result["type"] == data_entry_flow.FlowResultType.MENU
+    assert result["menu_options"] == ["credentials", "session"]
+
+
+async def test_two_factor_is_only_asked_for_when_mozillion_demands_it(
+    hass: HomeAssistant,
+) -> None:
+    client = _mock_client()
+    client.async_login = AsyncMock(
+        side_effect=[
+            MozillionTwoFactorRequired("2FA"),
+            ("mozillion_session=abc; XSRF-TOKEN=xyz", "xyz"),
+        ]
+    )
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+
+        assert result["step_id"] == "totp"
+        assert result["errors"] == {}
+        assert client.async_login.await_args.kwargs["totp_secret"] is None
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_TOTP_SECRET: "JBSWY3DPEHPK3PXP"}
+        )
+
+    assert result["step_id"] == "select_sim"
+    assert client.async_login.await_args.kwargs["totp_secret"] == "JBSWY3DPEHPK3PXP"
+
+
+async def test_account_without_two_factor_never_sees_the_totp_step(
+    hass: HomeAssistant,
+) -> None:
+    client = _mock_client()
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await _submit_login(hass, result, _login_input())
+
+    assert result["step_id"] == "select_sim"
+
+
+async def test_session_sign_in_skips_login_and_two_factor(
+    hass: HomeAssistant,
+) -> None:
+    client = _mock_client()
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass, "session")
+        assert result["step_id"] == "session"
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _cookie_input()
+        )
+
+    assert result["step_id"] == "select_sim"
+    client.async_login.assert_not_called()
+
+
+async def test_a_rejected_two_factor_secret_stays_on_the_totp_step(
+    hass: HomeAssistant,
+) -> None:
+    client = _mock_client(login_error=MozillionTwoFactorRejected("bad code"))
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+
+    assert result["step_id"] == "totp"
+    assert result["errors"]["base"] == "invalid_totp"
+
+
+async def test_an_unreadable_two_factor_secret_stays_on_the_totp_step(
+    hass: HomeAssistant,
+) -> None:
+    client = _mock_client(login_error=MozillionTotpSecretError("not base32"))
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+
+    assert result["step_id"] == "totp"
+    assert result["errors"]["base"] == "invalid_totp"
+
+
+async def test_solver_field_is_hidden_until_cloudflare_blocks(
+    hass: HomeAssistant,
+) -> None:
     result = await _start_user_flow(hass)
 
-    assert result["type"] == data_entry_flow.FlowResultType.FORM
-    assert result["step_id"] == "user"
-    assert result["errors"] == {}
+    assert CONF_FLARESOLVERR_URL not in result["data_schema"].schema
+
+
+async def test_cloudflare_block_offers_flaresolverr_then_succeeds(
+    hass: HomeAssistant,
+) -> None:
+    client = _mock_client()
+    client.async_login = AsyncMock(
+        side_effect=[
+            MozillionChallengeError("challenged"),
+            ("mozillion_session=abc; XSRF-TOKEN=xyz", "xyz"),
+        ]
+    )
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+
+        assert result["step_id"] == "credentials"
+        assert result["errors"]["base"] == "cloudflare_blocked"
+        assert CONF_FLARESOLVERR_URL in result["data_schema"].schema
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            _login_input(**{CONF_FLARESOLVERR_URL: " http://flaresolverr:8191/v1 "}),
+        )
+        assert client.flaresolverr_url == "http://flaresolverr:8191/v1"
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"sim": MOCK_SIM.display_name}
+        )
+
+    assert result["data"][CONF_FLARESOLVERR_URL] == "http://flaresolverr:8191/v1"
+
+
+async def test_a_failing_solver_keeps_the_user_on_the_credentials_form(
+    hass: HomeAssistant,
+) -> None:
+    client = _mock_client()
+    client.async_login = AsyncMock(
+        side_effect=[
+            MozillionChallengeError("challenged"),
+            MozillionSolverError("solver down"),
+        ]
+    )
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            _login_input(**{CONF_FLARESOLVERR_URL: "http://flaresolverr:8191/v1"}),
+        )
+
+    assert result["step_id"] == "credentials"
+    assert result["errors"]["base"] == "solver_failed"
+    assert CONF_FLARESOLVERR_URL in result["data_schema"].schema
+
+
+async def test_a_challenge_after_a_cookie_sign_in_points_at_the_session(
+    hass: HomeAssistant,
+) -> None:
+    client = _mock_client(usage_error=MozillionChallengeError("challenged"))
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass, "session")
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _cookie_input()
+        )
+
+    assert result["step_id"] == "session"
+    assert result["errors"]["base"] == "cloudflare_blocked"
 
 
 async def test_login_success_offers_the_sim_list(hass: HomeAssistant) -> None:
@@ -124,9 +336,7 @@ async def test_login_success_offers_the_sim_list(hass: HomeAssistant) -> None:
 
     with patch(CLIENT, return_value=client):
         result = await _start_user_flow(hass)
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _login_input()
-        )
+        result = await _submit_login(hass, result, _login_input())
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "select_sim"
@@ -140,9 +350,7 @@ async def test_selecting_a_sim_creates_the_entry(hass: HomeAssistant) -> None:
 
     with patch(CLIENT, return_value=client):
         result = await _start_user_flow(hass)
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _login_input()
-        )
+        result = await _submit_login(hass, result, _login_input())
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], {"sim": MOCK_SIM.display_name}
         )
@@ -175,17 +383,13 @@ async def test_entry_is_unique_per_account(hass: HomeAssistant) -> None:
 
     with patch(CLIENT, return_value=client):
         first = await _start_user_flow(hass)
-        first = await hass.config_entries.flow.async_configure(
-            first["flow_id"], _login_input()
-        )
+        first = await _submit_login(hass, first, _login_input())
         await hass.config_entries.flow.async_configure(
             first["flow_id"], {"sim": MOCK_SIM.display_name}
         )
 
         second = await _start_user_flow(hass)
-        second = await hass.config_entries.flow.async_configure(
-            second["flow_id"], _login_input()
-        )
+        second = await _submit_login(hass, second, _login_input())
 
     # The account is recognised at the login step, before any SIM is chosen: the
     # extra SIM belongs on the entry that already exists.
@@ -205,12 +409,10 @@ async def test_failed_login_shows_invalid_auth(hass: HomeAssistant) -> None:
 
     with patch(CLIENT, return_value=client):
         result = await _start_user_flow(hass)
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _login_input()
-        )
+        result = await _submit_login(hass, result, _login_input())
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
-    assert result["step_id"] == "user"
+    assert result["step_id"] == "credentials"
     assert result["errors"]["base"] == "invalid_auth"
 
 
@@ -223,12 +425,10 @@ async def test_a_network_failure_still_shows_cannot_connect(
 
     with patch(CLIENT, return_value=client):
         result = await _start_user_flow(hass)
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _login_input()
-        )
+        result = await _submit_login(hass, result, _login_input())
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
-    assert result["step_id"] == "user"
+    assert result["step_id"] == "credentials"
     assert result["errors"]["base"] == "cannot_connect"
 
 
@@ -239,13 +439,12 @@ async def test_no_credentials_and_no_cookie_shows_missing_auth(
 
     with patch(CLIENT, return_value=client):
         result = await _start_user_flow(hass)
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            _login_input(**{CONF_EMAIL: "", CONF_PASSWORD: ""}),
+        result = await _submit_login(
+            hass, result, _login_input(**{CONF_EMAIL: "", CONF_PASSWORD: ""})
         )
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
-    assert result["step_id"] == "user"
+    assert result["step_id"] == "credentials"
     assert result["errors"]["base"] == "missing_auth"
 
 
@@ -256,9 +455,7 @@ async def test_unreadable_sim_list_falls_back_to_manual_ids(
 
     with patch(CLIENT, return_value=client):
         result = await _start_user_flow(hass)
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _login_input()
-        )
+        result = await _submit_login(hass, result, _login_input())
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "manual_ids"
@@ -283,9 +480,7 @@ async def test_flow_builds_its_client_on_a_dedicated_session(
         ) as session,
     ):
         result = await _start_user_flow(hass)
-        await hass.config_entries.flow.async_configure(
-            result["flow_id"], _login_input()
-        )
+        await _submit_login(hass, result, _login_input())
 
     session.assert_called_once_with(hass)
 
@@ -306,17 +501,13 @@ async def test_a_retried_login_reuses_the_flow_session(hass: HomeAssistant) -> N
         ) as session,
     ):
         result = await _start_user_flow(hass)
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _login_input()
-        )
+        result = await _submit_login(hass, result, _login_input())
         assert result["errors"]["base"] == "invalid_auth"
 
         client.async_login = AsyncMock(
             return_value=("mozillion_session=abc; XSRF-TOKEN=xyz", "xyz")
         )
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _login_input()
-        )
+        result = await _submit_login(hass, result, _login_input())
 
     assert result["step_id"] == "select_sim"
     session.assert_called_once_with(hass)
@@ -331,7 +522,7 @@ async def test_manual_ids_creates_the_entry(hass: HomeAssistant) -> None:
     client = _mock_client(sims=[])
 
     with patch(CLIENT, return_value=client):
-        result = await _start_user_flow(hass)
+        result = await _start_user_flow(hass, "session")
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], _cookie_input()
         )
@@ -357,7 +548,7 @@ async def test_manual_ids_are_validated_against_the_api(
     client = _mock_client(sims=[], usage_error=RuntimeError("Unknown SIM"))
 
     with patch(CLIENT, return_value=client):
-        result = await _start_user_flow(hass)
+        result = await _start_user_flow(hass, "session")
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], _cookie_input()
         )
@@ -409,6 +600,74 @@ async def test_reauth_updates_the_stored_session(hass: HomeAssistant) -> None:
     assert result["reason"] == "reauth_successful"
 
 
+async def test_reauth_reuses_the_stored_two_factor_secret(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**MOCK_ENTRY_DATA_COOKIE, CONF_TOTP_SECRET: "JBSWY3DPEHPK3PXP"},
+        unique_id="7654321",
+        version=2,
+    )
+    entry.add_to_hass(hass)
+    client = _mock_client()
+
+    with patch(CLIENT, return_value=client):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_REAUTH,
+                "entry_id": entry.entry_id,
+            },
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _credentials_only(_login_input())
+        )
+
+    assert result["reason"] == "reauth_successful"
+    assert client.async_login.await_args.kwargs["totp_secret"] == "JBSWY3DPEHPK3PXP"
+
+
+async def test_reauth_asks_for_a_new_secret_when_the_stored_one_is_rejected(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**MOCK_ENTRY_DATA_COOKIE, CONF_TOTP_SECRET: "OLDSECRET"},
+        unique_id="7654321",
+        version=2,
+    )
+    entry.add_to_hass(hass)
+    client = _mock_client()
+    client.async_login = AsyncMock(
+        side_effect=[
+            MozillionTwoFactorRejected("bad code"),
+            ("mozillion_session=abc; XSRF-TOKEN=xyz", "xyz"),
+        ]
+    )
+
+    with patch(CLIENT, return_value=client):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_REAUTH,
+                "entry_id": entry.entry_id,
+            },
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _credentials_only(_login_input())
+        )
+        assert result["step_id"] == "reauth_totp"
+        assert result["errors"]["base"] == "invalid_totp"
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_TOTP_SECRET: "NEWSECRET"}
+        )
+
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_TOTP_SECRET] == "NEWSECRET"
+
+
 async def test_reauth_shows_invalid_auth_for_rejected_credentials(
     hass: HomeAssistant,
 ) -> None:
@@ -432,9 +691,7 @@ async def test_reauth_shows_invalid_auth_for_rejected_credentials(
         )
         assert result["step_id"] == "reauth_confirm"
 
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _credentials_only(_login_input())
-        )
+        result = await _submit_login(hass, result, _credentials_only(_login_input()))
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["errors"]["base"] == "invalid_auth"
@@ -461,9 +718,7 @@ async def test_reauth_shows_cannot_connect_for_a_network_failure(
                 "entry_id": entry.entry_id,
             },
         )
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _credentials_only(_login_input())
-        )
+        result = await _submit_login(hass, result, _credentials_only(_login_input()))
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["errors"]["base"] == "cannot_connect"
@@ -494,6 +749,133 @@ async def test_options_flow_updates_scan_interval(hass: HomeAssistant) -> None:
 
     assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
     assert result["data"] == {CONF_SCAN_INTERVAL: 7200}
+
+
+def _login_entry(hass: HomeAssistant, **extra: Any) -> MockConfigEntry:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Mozillion",
+        data={**MOCK_ENTRY_DATA_LOGIN, CONF_TOTP_SECRET: "OLDSECRET", **extra},
+        unique_id="user@example.com",
+        version=3,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def test_options_for_a_session_account_only_offer_the_interval(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN, data=dict(MOCK_ENTRY_DATA_COOKIE), unique_id="x", version=3
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert [str(k) for k in result["data_schema"].schema] == [CONF_SCAN_INTERVAL]
+
+
+async def test_options_offer_the_secret_and_solver_to_a_password_account(
+    hass: HomeAssistant,
+) -> None:
+    entry = _login_entry(hass, **{CONF_FLARESOLVERR_URL: "http://fs:8191/v1"})
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    suggested = {
+        str(k): k.description.get("suggested_value") if k.description else None
+        for k in result["data_schema"].schema
+    }
+    assert suggested[CONF_TOTP_SECRET] == "OLDSECRET"
+    assert suggested[CONF_FLARESOLVERR_URL] == "http://fs:8191/v1"
+
+
+async def test_a_new_secret_is_tested_then_saved(hass: HomeAssistant) -> None:
+    entry = _login_entry(hass)
+    client = _mock_client()
+
+    with patch(CLIENT, return_value=client):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {
+                CONF_SCAN_INTERVAL: 7200,
+                CONF_TOTP_SECRET: "NEWSECRET",
+                CONF_FLARESOLVERR_URL: "http://fs:8191/v1",
+            },
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["data"] == {CONF_SCAN_INTERVAL: 7200}
+    assert client.async_login.await_args.kwargs["totp_secret"] == "NEWSECRET"
+    assert entry.data[CONF_TOTP_SECRET] == "NEWSECRET"
+    assert entry.data[CONF_FLARESOLVERR_URL] == "http://fs:8191/v1"
+    # The login that proved the values refreshed the session too.
+    assert entry.data[CONF_SESSION_COOKIE] == "mozillion_session=abc; XSRF-TOKEN=xyz"
+
+
+@pytest.mark.parametrize(
+    ("login_error", "expected"),
+    [
+        (MozillionTwoFactorRejected("bad"), "invalid_totp"),
+        (MozillionTotpSecretError("not base32"), "invalid_totp"),
+        (MozillionChallengeError("blocked"), "cloudflare_blocked"),
+        (MozillionSolverError("down"), "solver_failed"),
+        (MozillionAuthError("bad password"), "invalid_auth"),
+        (RuntimeError("reset"), "cannot_connect"),
+    ],
+)
+async def test_a_value_that_fails_the_login_is_not_saved(
+    hass: HomeAssistant, login_error: Exception, expected: str
+) -> None:
+    entry = _login_entry(hass)
+    client = _mock_client(login_error=login_error)
+
+    with patch(CLIENT, return_value=client):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {CONF_SCAN_INTERVAL: 7200, CONF_TOTP_SECRET: "NEWSECRET"},
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["errors"]["base"] == expected
+    assert entry.data[CONF_TOTP_SECRET] == "OLDSECRET"
+    # The retry form keeps what was typed rather than snapping back.
+    key = next(k for k in result["data_schema"].schema if str(k) == CONF_TOTP_SECRET)
+    assert key.description == {"suggested_value": "NEWSECRET"}
+
+
+async def test_unchanged_values_skip_the_login(hass: HomeAssistant) -> None:
+    entry = _login_entry(hass)
+    client = _mock_client()
+
+    with patch(CLIENT, return_value=client):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {CONF_SCAN_INTERVAL: 7200, CONF_TOTP_SECRET: "OLDSECRET"},
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    client.async_login.assert_not_called()
+
+
+async def test_clearing_the_solver_removes_it(hass: HomeAssistant) -> None:
+    entry = _login_entry(hass, **{CONF_FLARESOLVERR_URL: "http://fs:8191/v1"})
+    client = _mock_client()
+
+    with patch(CLIENT, return_value=client):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        # A cleared optional field is simply absent from the submission.
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {CONF_SCAN_INTERVAL: 7200, CONF_TOTP_SECRET: "OLDSECRET"},
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert entry.data[CONF_FLARESOLVERR_URL] == ""
 
 
 async def test_options_flow_accepts_the_minimum_scan_interval(
@@ -601,9 +983,7 @@ async def test_reconfigure_updates_credentials_and_keeps_the_sims(
         )
         assert result["step_id"] == "reconfigure_confirm"
 
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _credentials_only(_login_input())
-        )
+        result = await _submit_login(hass, result, _credentials_only(_login_input()))
 
     assert result["type"] == data_entry_flow.FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
@@ -634,9 +1014,7 @@ async def test_reconfigure_shows_invalid_auth_for_rejected_credentials(
                 "entry_id": entry.entry_id,
             },
         )
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _credentials_only(_login_input())
-        )
+        result = await _submit_login(hass, result, _credentials_only(_login_input()))
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "reconfigure_confirm"
@@ -664,9 +1042,7 @@ async def test_reconfigure_shows_cannot_connect_for_a_network_failure(
                 "entry_id": entry.entry_id,
             },
         )
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _credentials_only(_login_input())
-        )
+        result = await _submit_login(hass, result, _credentials_only(_login_input()))
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "reconfigure_confirm"
@@ -700,3 +1076,114 @@ async def test_subentry_types_hook_is_callable_on_the_handler_class(
 
     assert SUBENTRY_TYPE_SIM in supported
     assert supported[SUBENTRY_TYPE_SIM] is not None
+
+
+# ---------------------------------------------------------------------------
+# FlareSolverr discovery
+# ---------------------------------------------------------------------------
+
+
+def _probe_session(answers: dict[str, Any]) -> MagicMock:
+    """A session whose GET answers per address; anything absent is unreachable."""
+
+    def get(url: str, **_: Any) -> MagicMock:
+        base = url.removesuffix("/")
+        ctx = MagicMock()
+        if base not in answers:
+            ctx.__aenter__ = AsyncMock(side_effect=ClientError("refused"))
+        else:
+            resp = MagicMock()
+            resp.json = AsyncMock(return_value=answers[base])
+            ctx.__aenter__ = AsyncMock(return_value=resp)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        return ctx
+
+    session = MagicMock()
+    session.get = get
+    return session
+
+
+READY = {"msg": "FlareSolverr is ready!", "version": "3.5.2"}
+
+
+async def test_discovery_finds_the_first_candidate_that_answers(
+    hass: HomeAssistant, _no_solver_discovery
+) -> None:
+    session = _probe_session(
+        {"http://localhost:8191": READY, "http://host.docker.internal:8191": READY}
+    )
+
+    with patch(
+        "custom_components.mozillion.config_flow.async_get_clientsession",
+        return_value=session,
+    ):
+        found = await real_discover(hass)
+
+    assert found == "http://localhost:8191/v1"
+
+
+async def test_discovery_returns_nothing_when_no_one_answers(
+    hass: HomeAssistant,
+) -> None:
+    with patch(
+        "custom_components.mozillion.config_flow.async_get_clientsession",
+        return_value=_probe_session({}),
+    ):
+        assert await real_discover(hass) == ""
+
+
+async def test_discovery_ignores_other_services_on_the_port(
+    hass: HomeAssistant,
+) -> None:
+    session = _probe_session({"http://flaresolverr:8191": {"msg": "hello"}})
+
+    with patch(
+        "custom_components.mozillion.config_flow.async_get_clientsession",
+        return_value=session,
+    ):
+        assert await real_discover(hass) == ""
+
+
+async def test_a_block_suggests_the_address_that_answered(
+    hass: HomeAssistant, _no_solver_discovery
+) -> None:
+    _no_solver_discovery.return_value = "http://flaresolverr:8191/v1"
+    client = _mock_client(login_error=MozillionChallengeError("challenged"))
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+
+    key = next(k for k in result["data_schema"].schema if k == CONF_FLARESOLVERR_URL)
+    assert key.description == {"suggested_value": "http://flaresolverr:8191/v1"}
+    _no_solver_discovery.assert_awaited_once()
+
+
+async def test_a_typed_address_is_never_overwritten_by_a_suggestion(
+    hass: HomeAssistant, _no_solver_discovery
+) -> None:
+    _no_solver_discovery.return_value = "http://flaresolverr:8191/v1"
+    client = _mock_client()
+    client.async_login = AsyncMock(
+        side_effect=[
+            MozillionChallengeError("challenged"),
+            MozillionSolverError("down"),
+        ]
+    )
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            _login_input(**{CONF_FLARESOLVERR_URL: "http://mine:8191/v1"}),
+        )
+
+    key = next(k for k in result["data_schema"].schema if k == CONF_FLARESOLVERR_URL)
+    assert key.description == {"suggested_value": "http://mine:8191/v1"}
+    # Probed once, on the first block only.
+    _no_solver_discovery.assert_awaited_once()

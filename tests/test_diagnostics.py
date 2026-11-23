@@ -13,6 +13,7 @@ import pytest
 from custom_components.mozillion import MozillionRuntimeData
 from custom_components.mozillion.const import (
     CONF_EMAIL,
+    CONF_FLARESOLVERR_URL,
     CONF_ICCID,
     CONF_ORDER_DETAIL_ID,
     CONF_PASSWORD,
@@ -25,6 +26,7 @@ from custom_components.mozillion.const import (
 from custom_components.mozillion.diagnostics import (
     async_get_config_entry_diagnostics,
 )
+from custom_components.mozillion.session import MozillionSession
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -162,3 +164,50 @@ async def test_exception_is_reported_as_a_string(hass: HomeAssistant) -> None:
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
 
     assert diagnostics["coordinators"][subentry_id]["last_exception"] == "boom"
+
+
+async def test_account_block_reports_how_the_account_signs_in(
+    hass: HomeAssistant,
+) -> None:
+    entry, _ = _entry_with_coordinator(hass)
+    entry.runtime_data.session = MozillionSession(challenge_issue_active=True)
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_FLARESOLVERR_URL: "http://flaresolverr:8191/v1"}
+    )
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["account"] == {
+        "auth_method": "credentials+2fa",
+        "solver_configured": True,
+        "challenge_issue_active": True,
+    }
+
+
+async def test_session_only_accounts_are_labelled_as_such(
+    hass: HomeAssistant,
+) -> None:
+    entry, _ = _entry_with_coordinator(hass)
+    entry.runtime_data.session = MozillionSession()
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_EMAIL: "", CONF_PASSWORD: ""}
+    )
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["account"]["auth_method"] == "session"
+    assert diagnostics["account"]["solver_configured"] is False
+
+
+async def test_the_flaresolverr_address_is_redacted(hass: HomeAssistant) -> None:
+    entry, _ = _entry_with_coordinator(hass)
+    entry.runtime_data.session = MozillionSession()
+    address = "http://192.168.1.50:8191/v1"
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_FLARESOLVERR_URL: address}
+    )
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert address not in str(diagnostics)
+    assert diagnostics["entry"]["data"][CONF_FLARESOLVERR_URL] == "**REDACTED**"

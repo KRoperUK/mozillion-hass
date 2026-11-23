@@ -27,6 +27,7 @@ CONF_EMAIL = "email"
 CONF_PASSWORD = "password"
 CONF_TOTP_SECRET = "totp_secret"
 CONF_ORIGIN = "origin"
+CONF_FLARESOLVERR_URL = "flaresolverr_url"
 
 # Mozillion regenerates usage server-side and answers "pending" until the
 # numbers are ready, so each poll mirrors the dashboard's own polling loop
@@ -34,12 +35,28 @@ CONF_ORIGIN = "origin"
 USAGE_POLL_ATTEMPTS = 5
 USAGE_POLL_DELAY = 3.0
 
+# Where FlareSolverr usually answers, probed once when Cloudflare blocks setup so
+# the form can suggest an address. A fixed list: nothing else is ever scanned.
+SOLVER_CANDIDATES = (
+    "http://flaresolverr:8191",
+    "http://localhost:8191",
+    "http://host.docker.internal:8191",
+)
+SOLVER_PROBE_TIMEOUT = 2  # seconds
+
+# Seconds FlareSolverr may spend clearing a challenge before we give up.
+SOLVER_TIMEOUT = 60
+
 DEFAULT_SCAN_INTERVAL = 3600
 DEFAULT_ORIGIN = BASE_URL
 
 # Proactively re-authenticate once a session is older than this, so we never
 # poll with an already-expired cookie/token.
 AUTH_REFRESH_THRESHOLD = 43200  # 12 hours, in seconds
+
+# With a FlareSolverr configured, renew Cloudflare's clearance this long before
+# it expires, so the expiry costs a quiet re-solve rather than a failed poll.
+CLEARANCE_REFRESH_MARGIN = 7200  # 2 hours, in seconds
 
 # The plan, SIM status and reset date come from a 355 KB dashboard page. None of
 # them change hourly (the reset label is monthly), so the page is refreshed on
@@ -52,6 +69,9 @@ DASHBOARD_REFRESH_INTERVAL = 21600  # 6 hours, in seconds
 # single blip does not nag the user.
 REPAIR_FAILURE_THRESHOLD = 3
 ISSUE_DASHBOARD_UNREADABLE = "dashboard_unreadable"
+# One per account (the entry id is appended), because the fix is a setting on
+# the entry: where FlareSolverr lives.
+ISSUE_CLOUDFLARE_BLOCKED = "cloudflare_blocked"
 
 ATTR_RAW = "raw"
 ATTR_USAGE = "usage"
