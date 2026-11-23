@@ -60,7 +60,9 @@ Add the integration and choose one of:
 
 - **Email and password** — the integration logs in and keeps the session fresh
   by itself. If Mozillion asks for two-factor, you are then prompted for the TOTP
-  secret (or `otpauth://` link) and codes are generated automatically. Recommended.
+  secret (or `otpauth://` link) and codes are generated automatically. Recommended. If Cloudflare
+  blocks the sign-in, the form offers a [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr)
+  address to get past it.
 - **A session cookie** copied from your browser — simplest to set up, but you
   will be asked for a fresh cookie when it expires.
 

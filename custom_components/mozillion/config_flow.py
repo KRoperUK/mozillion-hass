@@ -28,14 +28,17 @@ from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
 from .api import (
     MozillionAuthError,
+    MozillionChallengeError,
     MozillionClient,
     MozillionSim,
+    MozillionSolverError,
     MozillionTotpSecretError,
     MozillionTwoFactorRejected,
     MozillionTwoFactorRequired,
 )
 from .const import (
     CONF_EMAIL,
+    CONF_FLARESOLVERR_URL,
     CONF_ICCID,
     CONF_ORDER_DETAIL_ID,
     CONF_ORIGIN,
@@ -69,7 +72,9 @@ _LOGGER = logging.getLogger(__name__)
 MIN_SCAN_INTERVAL = 60
 
 
-def _dedicated_client(hass: HomeAssistant) -> MozillionClient:
+def _dedicated_client(
+    hass: HomeAssistant, flaresolverr_url: str | None = None
+) -> MozillionClient:
     """Build a client on a session the caller owns.
 
     The session deliberately does not come from ``async_get_clientsession``:
@@ -85,11 +90,15 @@ def _dedicated_client(hass: HomeAssistant) -> MozillionClient:
     ``MozillionConfigFlow._async_client``.
     """
 
-    return MozillionClient(async_create_clientsession(hass))
+    return MozillionClient(
+        async_create_clientsession(hass), flaresolverr_url=flaresolverr_url or None
+    )
 
 
 # Errors that mean "ask for (or re-ask for) the 2FA secret" rather than "start over".
 _TOTP_ERRORS = frozenset({"two_factor_required", "invalid_totp"})
+# Errors fixed by changing how we reach Mozillion, not by changing a credential.
+_BLOCKED_ERRORS = frozenset({"cloudflare_blocked", "solver_failed"})
 
 
 def _suggest(value: Any) -> dict[str, Any]:
@@ -120,6 +129,18 @@ def _login_fields(
         ): selector.TextSelector(
             selector.TextSelectorConfig(type=selector.TextSelectorType.URL)
         ),
+    }
+
+
+def _solver_field(default: str = "") -> dict[Any, Any]:
+    """The FlareSolverr address, offered once Cloudflare has blocked a login."""
+
+    return {
+        schema.Optional(
+            CONF_FLARESOLVERR_URL, description=_suggest(default)
+        ): selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.URL)
+        )
     }
 
 
@@ -293,6 +314,9 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
         self._credentials: dict[str, Any] = {}
         # Email, password and the advanced fields, held while the TOTP step runs.
         self._pending: dict[str, Any] = {}
+        # Set once Cloudflare blocks a login: the sign-in form then also offers a
+        # FlareSolverr address, which is hidden until it is relevant.
+        self._show_solver = False
         # Which sign-in form the user picked: "credentials" or "session".
         self._mode = "credentials"
         self._sims: list[MozillionSim] = []
@@ -392,6 +416,10 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 step_id = "credentials"
                 fields = _login_fields(self._pending, required=True)
+                if self._show_solver:
+                    fields.update(
+                        _solver_field(self._pending.get(CONF_FLARESOLVERR_URL, ""))
+                    )
             return self.async_show_form(
                 step_id=step_id,
                 data_schema=schema.Schema({**fields, **_scan_interval_field()}),
@@ -399,11 +427,13 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
             )
 
         entry = self._entry_for(kind)
+        stored = str(entry.data.get(CONF_FLARESOLVERR_URL) or "")
         return self.async_show_form(
             step_id=f"{kind}_confirm",
             data_schema=schema.Schema(
                 {
                     **_login_fields(entry.data, required=False),
+                    **(_solver_field(stored) if self._show_solver or stored else {}),
                     **_session_fields(required=False, advanced=True),
                 }
             ),
@@ -432,6 +462,11 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
             return None, "two_factor_required"
         except (MozillionTotpSecretError, MozillionTwoFactorRejected):
             return None, "invalid_totp"
+        except MozillionSolverError:
+            _LOGGER.exception("FlareSolverr could not clear the challenge")
+            return None, "solver_failed"
+        except MozillionChallengeError:
+            return None, "cloudflare_blocked"
         # After the 2FA errors: a rejected password is a wrong password, not an
         # unreachable server.
         except MozillionAuthError:
@@ -448,16 +483,25 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
 
         data = dict(data)
         if kind != "user":
-            # Reuse the stored secret so a routine reauth never asks for it.
+            # Reuse what is stored so a routine reauth never asks for it again.
+            stored = self._entry_for(kind).data
+            data.setdefault(CONF_TOTP_SECRET, stored.get(CONF_TOTP_SECRET, ""))
             data.setdefault(
-                CONF_TOTP_SECRET, self._entry_for(kind).data.get(CONF_TOTP_SECRET, "")
+                CONF_FLARESOLVERR_URL, stored.get(CONF_FLARESOLVERR_URL, "")
             )
+        solver = str(data.get(CONF_FLARESOLVERR_URL) or "").strip()
+        data[CONF_FLARESOLVERR_URL] = solver
+        self._async_client().flaresolverr_url = solver or None
 
         result, error = await self._async_try_login(data)
         if error in _TOTP_ERRORS:
             return self._totp_form(
                 kind, {} if error == "two_factor_required" else {"base": error}
             )
+        if error in _BLOCKED_ERRORS:
+            # Not a credential problem, so go back to the form that can fix it.
+            self._show_solver = True
+            return self._main_form(kind, {"base": error})
         if error or result is None:
             errors = {"base": error or "cannot_connect"}
             if from_totp:
@@ -488,6 +532,9 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
                 cookie_header=self._cookie_header or "",
                 xsrf_token=self._xsrf_token,
             )
+        except MozillionChallengeError:
+            self._show_solver = self._mode == "credentials"
+            return self._main_form("user", {"base": "cloudflare_blocked"})
         except RuntimeError:
             _LOGGER.exception(
                 "Failed to fetch the SIM list; falling back to manual entry"
@@ -677,6 +724,7 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
             or entry.data.get(CONF_TOTP_SECRET, ""),
             CONF_ORIGIN: updated.get(CONF_ORIGIN)
             or entry.data.get(CONF_ORIGIN, DEFAULT_ORIGIN),
+            CONF_FLARESOLVERR_URL: updated.get(CONF_FLARESOLVERR_URL, ""),
             CONF_SESSION_COOKIE: updated.get(CONF_SESSION_COOKIE, ""),
             CONF_XSRF_TOKEN: updated.get(CONF_XSRF_TOKEN, ""),
         }
@@ -755,7 +803,9 @@ class SimSubentryFlowHandler(ConfigSubentryFlow):
         """Return this flow's client, building its session on first use."""
 
         if self._client is None:
-            self._client = _dedicated_client(self.hass)
+            self._client = _dedicated_client(
+                self.hass, self._get_entry().data.get(CONF_FLARESOLVERR_URL)
+            )
         return self._client
 
     async def async_step_user(

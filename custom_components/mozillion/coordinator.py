@@ -18,6 +18,7 @@ from homeassistant.util import dt as dt_util
 
 from .api import (
     MozillionAuthError,
+    MozillionChallengeError,
     MozillionClient,
     MozillionSim,
     mask_identifier,
@@ -436,6 +437,8 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             raw, sim, wallet = await self._async_read_all()
         except MozillionAuthError as err:
             raw, sim, wallet = await self._async_retry_after_auth_error(err)
+        except MozillionChallengeError as err:
+            raw, sim, wallet = await self._async_retry_after_challenge(err)
         except RuntimeError as err:
             _LOGGER.error("Update failed: %s", err)
             raise UpdateFailed(err) from err
@@ -456,6 +459,33 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             data[ATTR_WALLET],
         )
         return data
+
+    async def _async_retry_after_challenge(
+        self, error: MozillionChallengeError
+    ) -> tuple[dict[str, Any], MozillionSim | None, dict[str, Any] | None]:
+        """Clear a Cloudflare challenge through FlareSolverr once, then retry.
+
+        A challenge is not a rejected session, so this never starts reauth: the
+        credentials are fine and asking for them again would not help. Without a
+        solver (or without credentials to log in again with) there is nothing to
+        retry, so the poll fails with the error's own guidance.
+        """
+
+        if not (self.client.has_solver and has_credentials(self.entry)):
+            _LOGGER.error("Update failed: %s", error)
+            raise UpdateFailed(error) from error
+
+        _LOGGER.warning("Cloudflare challenged the poll; clearing it with FlareSolverr")
+        try:
+            self.session.authenticated_at = None
+            await self._async_refresh_auth()
+            return await self._async_read_all()
+        except MozillionAuthError as retry_error:
+            raise ConfigEntryAuthFailed(
+                "Mozillion rejected the configured credentials"
+            ) from retry_error
+        except RuntimeError as retry_error:
+            raise UpdateFailed(retry_error) from retry_error
 
     async def _async_retry_after_auth_error(
         self, error: MozillionAuthError

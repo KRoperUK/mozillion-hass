@@ -15,7 +15,11 @@ from aiohttp import ClientError
 from custom_components.mozillion import MozillionAuthError, MozillionCoordinator
 from custom_components.mozillion import api as api_module
 from custom_components.mozillion import coordinator as coordinator_module
-from custom_components.mozillion.api import MozillionSim
+from custom_components.mozillion.api import (
+    MozillionChallengeError,
+    MozillionSim,
+    MozillionSolverError,
+)
 from custom_components.mozillion.const import (
     ATTR_DAYS_LEFT,
     ATTR_ICCID,
@@ -467,6 +471,60 @@ class TestCoordinatorUpdate:
         )
 
         with pytest.raises(ConfigEntryAuthFailed, match="rejected the configured"):
+            await coordinator._async_update_data()
+
+    @pytest.mark.asyncio
+    async def test_challenge_with_a_solver_relogs_in_and_retries(self) -> None:
+        """FlareSolverr clears the challenge by logging in again, once."""
+        client = _client()
+        client.has_solver = True
+        client.async_login.return_value = ("new-cookie", "new-xsrf")
+        client.async_get_usage.side_effect = [
+            MozillionChallengeError("challenged"),
+            MOCK_API_RESPONSE,
+        ]
+        coordinator = _make_coordinator(
+            client, entry_data=MOCK_ENTRY_DATA_LOGIN, cookie="c", xsrf="x"
+        )
+        coordinator.session.authenticated_at = time.monotonic()
+
+        result = await coordinator._async_update_data()
+
+        client.async_login.assert_called_once()
+        assert result[ATTR_USAGE] == 3.5
+
+    @pytest.mark.asyncio
+    async def test_challenge_without_a_solver_fails_the_poll_not_the_login(
+        self,
+    ) -> None:
+        """A challenge is not a rejected session, so it must never start reauth."""
+        client = _client()
+        client.has_solver = False
+        client.async_get_usage.side_effect = MozillionChallengeError("challenged")
+        coordinator = _make_coordinator(
+            client, entry_data=MOCK_ENTRY_DATA_LOGIN, cookie="c", xsrf="x"
+        )
+        coordinator.session.authenticated_at = time.monotonic()
+
+        with pytest.raises(UpdateFailed, match="challenged"):
+            await coordinator._async_update_data()
+
+        client.async_login.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_solver_that_cannot_clear_the_challenge_fails_the_poll(
+        self,
+    ) -> None:
+        client = _client()
+        client.has_solver = True
+        client.async_login.side_effect = MozillionSolverError("solver down")
+        coordinator = _make_coordinator(
+            client, entry_data=MOCK_ENTRY_DATA_LOGIN, cookie="c", xsrf="x"
+        )
+        client.async_get_usage.side_effect = MozillionChallengeError("challenged")
+        coordinator.session.authenticated_at = time.monotonic()
+
+        with pytest.raises(UpdateFailed, match="solver down"):
             await coordinator._async_update_data()
 
     @pytest.mark.asyncio

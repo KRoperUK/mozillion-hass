@@ -8,12 +8,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from custom_components.mozillion.api import (
     MozillionAuthError,
+    MozillionChallengeError,
+    MozillionSolverError,
     MozillionTotpSecretError,
     MozillionTwoFactorRejected,
     MozillionTwoFactorRequired,
 )
 from custom_components.mozillion.const import (
     CONF_EMAIL,
+    CONF_FLARESOLVERR_URL,
     CONF_ICCID,
     CONF_ORDER_DETAIL_ID,
     CONF_PASSWORD,
@@ -224,6 +227,88 @@ async def test_an_unreadable_two_factor_secret_stays_on_the_totp_step(
 
     assert result["step_id"] == "totp"
     assert result["errors"]["base"] == "invalid_totp"
+
+
+async def test_solver_field_is_hidden_until_cloudflare_blocks(
+    hass: HomeAssistant,
+) -> None:
+    result = await _start_user_flow(hass)
+
+    assert CONF_FLARESOLVERR_URL not in result["data_schema"].schema
+
+
+async def test_cloudflare_block_offers_flaresolverr_then_succeeds(
+    hass: HomeAssistant,
+) -> None:
+    client = _mock_client()
+    client.async_login = AsyncMock(
+        side_effect=[
+            MozillionChallengeError("challenged"),
+            ("mozillion_session=abc; XSRF-TOKEN=xyz", "xyz"),
+        ]
+    )
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+
+        assert result["step_id"] == "credentials"
+        assert result["errors"]["base"] == "cloudflare_blocked"
+        assert CONF_FLARESOLVERR_URL in result["data_schema"].schema
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            _login_input(**{CONF_FLARESOLVERR_URL: " http://flaresolverr:8191/v1 "}),
+        )
+        assert client.flaresolverr_url == "http://flaresolverr:8191/v1"
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"sim": MOCK_SIM.display_name}
+        )
+
+    assert result["data"][CONF_FLARESOLVERR_URL] == "http://flaresolverr:8191/v1"
+
+
+async def test_a_failing_solver_keeps_the_user_on_the_credentials_form(
+    hass: HomeAssistant,
+) -> None:
+    client = _mock_client()
+    client.async_login = AsyncMock(
+        side_effect=[
+            MozillionChallengeError("challenged"),
+            MozillionSolverError("solver down"),
+        ]
+    )
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            _login_input(**{CONF_FLARESOLVERR_URL: "http://flaresolverr:8191/v1"}),
+        )
+
+    assert result["step_id"] == "credentials"
+    assert result["errors"]["base"] == "solver_failed"
+    assert CONF_FLARESOLVERR_URL in result["data_schema"].schema
+
+
+async def test_a_challenge_after_a_cookie_sign_in_points_at_the_session(
+    hass: HomeAssistant,
+) -> None:
+    client = _mock_client(usage_error=MozillionChallengeError("challenged"))
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass, "session")
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _cookie_input()
+        )
+
+    assert result["step_id"] == "session"
+    assert result["errors"]["base"] == "cloudflare_blocked"
 
 
 async def test_login_success_offers_the_sim_list(hass: HomeAssistant) -> None:
