@@ -152,9 +152,21 @@
       "init": {
         "title": "Options Mozillion",
         "data": {
-          "scan_interval": "Intervalle d'interrogation (secondes)"
-        }
+          "scan_interval": "Intervalle d'interrogation (secondes)",
+          "totp_secret": "Secret TOTP ou lien otpauth://",
+          "flaresolverr_url": "Adresse de FlareSolverr (p. ex. http://flaresolverr:8191/v1)"
+        },
+        "description": "Pour un compte qui se connecte avec un mot de passe, un nouveau secret à deux facteurs ou une nouvelle adresse FlareSolverr est testé par une vraie connexion avant d'être enregistré. Videz un champ pour le supprimer."
       }
+    },
+    "error": {
+      "invalid_auth": "Mozillion a refusé l'adresse e-mail ou le mot de passe enregistrés. Utilisez Reconfigurer pour les modifier.",
+      "invalid_totp": "Mozillion a refusé le secret à deux facteurs. Collez à nouveau le secret Base32 ou le lien otpauth://.",
+      "missing_auth": "Ce compte n'a ni adresse e-mail ni mot de passe enregistrés pour tester.",
+      "cloudflare_blocked": "Cloudflare bloque la connexion depuis ce réseau. Ajoutez une adresse FlareSolverr, ou vérifiez celle saisie.",
+      "solver_failed": "FlareSolverr n'a pas pu franchir le défi de Cloudflare. Vérifiez l'adresse, et qu'il tourne sur le même réseau que Home Assistant.",
+      "cannot_connect": "Impossible de se connecter à Mozillion. Vérifiez le réseau et réessayez.",
+      "two_factor_required": "Mozillion a demandé un code à deux facteurs. Saisissez le secret TOTP ou le lien otpauth://."
     }
   },
   "entity": {

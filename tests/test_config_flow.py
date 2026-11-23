@@ -38,7 +38,12 @@ from homeassistant import config_entries, data_entry_flow
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from tests.conftest import MOCK_ENTRY_DATA_COOKIE, MOCK_SIM, _make_config_entry
+from tests.conftest import (
+    MOCK_ENTRY_DATA_COOKIE,
+    MOCK_ENTRY_DATA_LOGIN,
+    MOCK_SIM,
+    _make_config_entry,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -744,6 +749,133 @@ async def test_options_flow_updates_scan_interval(hass: HomeAssistant) -> None:
 
     assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
     assert result["data"] == {CONF_SCAN_INTERVAL: 7200}
+
+
+def _login_entry(hass: HomeAssistant, **extra: Any) -> MockConfigEntry:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Mozillion",
+        data={**MOCK_ENTRY_DATA_LOGIN, CONF_TOTP_SECRET: "OLDSECRET", **extra},
+        unique_id="user@example.com",
+        version=3,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def test_options_for_a_session_account_only_offer_the_interval(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN, data=dict(MOCK_ENTRY_DATA_COOKIE), unique_id="x", version=3
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert [str(k) for k in result["data_schema"].schema] == [CONF_SCAN_INTERVAL]
+
+
+async def test_options_offer_the_secret_and_solver_to_a_password_account(
+    hass: HomeAssistant,
+) -> None:
+    entry = _login_entry(hass, **{CONF_FLARESOLVERR_URL: "http://fs:8191/v1"})
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    suggested = {
+        str(k): k.description.get("suggested_value") if k.description else None
+        for k in result["data_schema"].schema
+    }
+    assert suggested[CONF_TOTP_SECRET] == "OLDSECRET"
+    assert suggested[CONF_FLARESOLVERR_URL] == "http://fs:8191/v1"
+
+
+async def test_a_new_secret_is_tested_then_saved(hass: HomeAssistant) -> None:
+    entry = _login_entry(hass)
+    client = _mock_client()
+
+    with patch(CLIENT, return_value=client):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {
+                CONF_SCAN_INTERVAL: 7200,
+                CONF_TOTP_SECRET: "NEWSECRET",
+                CONF_FLARESOLVERR_URL: "http://fs:8191/v1",
+            },
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["data"] == {CONF_SCAN_INTERVAL: 7200}
+    assert client.async_login.await_args.kwargs["totp_secret"] == "NEWSECRET"
+    assert entry.data[CONF_TOTP_SECRET] == "NEWSECRET"
+    assert entry.data[CONF_FLARESOLVERR_URL] == "http://fs:8191/v1"
+    # The login that proved the values refreshed the session too.
+    assert entry.data[CONF_SESSION_COOKIE] == "mozillion_session=abc; XSRF-TOKEN=xyz"
+
+
+@pytest.mark.parametrize(
+    ("login_error", "expected"),
+    [
+        (MozillionTwoFactorRejected("bad"), "invalid_totp"),
+        (MozillionTotpSecretError("not base32"), "invalid_totp"),
+        (MozillionChallengeError("blocked"), "cloudflare_blocked"),
+        (MozillionSolverError("down"), "solver_failed"),
+        (MozillionAuthError("bad password"), "invalid_auth"),
+        (RuntimeError("reset"), "cannot_connect"),
+    ],
+)
+async def test_a_value_that_fails_the_login_is_not_saved(
+    hass: HomeAssistant, login_error: Exception, expected: str
+) -> None:
+    entry = _login_entry(hass)
+    client = _mock_client(login_error=login_error)
+
+    with patch(CLIENT, return_value=client):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {CONF_SCAN_INTERVAL: 7200, CONF_TOTP_SECRET: "NEWSECRET"},
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["errors"]["base"] == expected
+    assert entry.data[CONF_TOTP_SECRET] == "OLDSECRET"
+    # The retry form keeps what was typed rather than snapping back.
+    key = next(k for k in result["data_schema"].schema if str(k) == CONF_TOTP_SECRET)
+    assert key.description == {"suggested_value": "NEWSECRET"}
+
+
+async def test_unchanged_values_skip_the_login(hass: HomeAssistant) -> None:
+    entry = _login_entry(hass)
+    client = _mock_client()
+
+    with patch(CLIENT, return_value=client):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {CONF_SCAN_INTERVAL: 7200, CONF_TOTP_SECRET: "OLDSECRET"},
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    client.async_login.assert_not_called()
+
+
+async def test_clearing_the_solver_removes_it(hass: HomeAssistant) -> None:
+    entry = _login_entry(hass, **{CONF_FLARESOLVERR_URL: "http://fs:8191/v1"})
+    client = _mock_client()
+
+    with patch(CLIENT, return_value=client):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        # A cleared optional field is simply absent from the submission.
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {CONF_SCAN_INTERVAL: 7200, CONF_TOTP_SECRET: "OLDSECRET"},
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert entry.data[CONF_FLARESOLVERR_URL] == ""
 
 
 async def test_options_flow_accepts_the_minimum_scan_interval(
