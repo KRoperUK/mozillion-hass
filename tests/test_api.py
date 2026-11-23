@@ -12,6 +12,8 @@ from aiohttp import ClientError, ClientSession, CookieJar
 from custom_components.mozillion.api import (
     MozillionAuthError,
     MozillionClient,
+    MozillionTwoFactorRejected,
+    MozillionTwoFactorRequired,
     _build_cookie_header,
     _extract_csrf,
     mask_identifier,
@@ -418,7 +420,7 @@ class TestAsyncLogin:
         )
 
         client = MozillionClient(session)
-        with pytest.raises(RuntimeError, match="2FA code"):
+        with pytest.raises(MozillionTwoFactorRequired, match="2FA code"):
             await client.async_login("user@example.com", "pass123")
 
     @pytest.mark.asyncio
@@ -432,7 +434,7 @@ class TestAsyncLogin:
         )
 
         client = MozillionClient(session)
-        with pytest.raises(MozillionAuthError, match="2FA"):
+        with pytest.raises(MozillionTwoFactorRejected, match="2FA"):
             await client.async_login(
                 "user@example.com", "pass123", totp_secret="JBSWY3DPEHPK3PXP"
             )

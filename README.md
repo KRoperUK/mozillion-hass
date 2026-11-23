@@ -58,8 +58,9 @@ Entities are named `Usage`, `Total`, `Remaining`, `Usage Percentage` and
 
 Add the integration and choose one of:
 
-- **Email, password and (if enabled) TOTP secret** — the integration logs in and
-  keeps the session fresh by itself. Recommended.
+- **Email and password** — the integration logs in and keeps the session fresh
+  by itself. If Mozillion asks for two-factor, you are then prompted for the TOTP
+  secret (or `otpauth://` link) and codes are generated automatically. Recommended.
 - **A session cookie** copied from your browser — simplest to set up, but you
   will be asked for a fresh cookie when it expires.
 

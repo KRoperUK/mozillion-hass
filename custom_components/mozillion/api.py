@@ -48,6 +48,18 @@ class MozillionAuthError(RuntimeError):
     """Raised when the session is no longer authenticated (cookie/token expired)."""
 
 
+class MozillionTwoFactorRequired(RuntimeError):
+    """Login reached Mozillion's 2FA page and no TOTP secret was supplied."""
+
+
+class MozillionTotpSecretError(RuntimeError):
+    """The TOTP secret supplied cannot be read (not Base32 or an otpauth link)."""
+
+
+class MozillionTwoFactorRejected(MozillionAuthError):
+    """Mozillion rejected the generated TOTP code, so the secret is wrong."""
+
+
 @dataclass(frozen=True, slots=True)
 class MozillionSim:
     """A SIM as advertised by the Mozillion dashboard.
@@ -138,7 +150,7 @@ class MozillionClient:
 
         if "/2fa" in final_url:
             if totp is None:
-                raise RuntimeError(
+                raise MozillionTwoFactorRequired(
                     "Mozillion asked for a 2FA code but no TOTP secret is "
                     "configured. Add the Base32 secret to the integration."
                 )
@@ -197,7 +209,7 @@ class MozillionClient:
             origin=origin,
         )
         if "/2fa" in final_url:
-            raise MozillionAuthError(
+            raise MozillionTwoFactorRejected(
                 "2FA verification failed - Mozillion rejected the TOTP code"
             )
 
@@ -762,7 +774,7 @@ def _build_totp(secret: str) -> pyotp.TOTP:
     try:
         base64.b32decode(normalised, casefold=True)
     except (binascii.Error, ValueError) as err:
-        raise RuntimeError(
+        raise MozillionTotpSecretError(
             "The TOTP secret is not valid Base32. Paste the secret shown by "
             "Mozillion, or the whole otpauth:// link it gives you."
         ) from err
@@ -780,7 +792,7 @@ def _normalise_totp_secret(secret: str) -> str:
 
     value = re.sub(r"[\s-]", "", value).upper()
     if not value:
-        raise RuntimeError(
+        raise MozillionTotpSecretError(
             "No TOTP secret found. Provide the Base32 secret or the otpauth:// link."
         )
 

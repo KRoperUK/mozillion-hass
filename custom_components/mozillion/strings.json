@@ -3,14 +3,36 @@
     "step": {
       "user": {
         "title": "Mozillion",
-        "description": "Connect to Mozillion to fetch data usage.",
+        "description": "How do you want to sign in?",
+        "menu_options": {
+          "credentials": "Email and password",
+          "session": "Browser session cookie"
+        }
+      },
+      "credentials": {
+        "title": "Sign in to Mozillion",
+        "description": "Mozillion will only ask for a two-factor secret next if your account needs one.",
         "data": {
           "email": "Email",
           "password": "Password",
           "origin": "Origin header (optional)",
-          "session_cookie": "Cookie header (optional if using login)",
+          "scan_interval": "Scan interval (seconds)"
+        }
+      },
+      "session": {
+        "title": "Use a browser session",
+        "description": "Sign in to Mozillion in a browser, then copy the Cookie header and XSRF token from its developer tools.",
+        "data": {
+          "session_cookie": "Cookie header",
           "xsrf_token": "XSRF token header (optional)",
           "scan_interval": "Scan interval (seconds)"
+        }
+      },
+      "totp": {
+        "title": "Two-factor secret",
+        "description": "Mozillion asked for a two-factor code. Paste the Base32 secret or the otpauth:// link shown when you set up your authenticator app. The integration keeps it and generates the codes itself.",
+        "data": {
+          "totp_secret": "TOTP secret or otpauth:// link"
         }
       },
       "select_sim": {
@@ -36,7 +58,8 @@
           "email": "Email",
           "password": "Password",
           "session_cookie": "Cookie header (optional if using login)",
-          "xsrf_token": "XSRF token header (optional)"
+          "xsrf_token": "XSRF token header (optional)",
+          "origin": "Origin header (optional)"
         }
       },
       "reconfigure_confirm": {
@@ -46,35 +69,30 @@
           "email": "Email",
           "password": "Password",
           "session_cookie": "Cookie header (optional if using login)",
-          "xsrf_token": "XSRF token header (optional)"
-        }
-      },
-      "totp": {
-        "title": "Two-factor code",
-        "description": "If your Mozillion account uses an authenticator app, paste its Base32 secret so the integration can sign in. Leave blank if it does not.",
-        "data": {
-          "totp_secret": "TOTP secret (Base32, optional)"
+          "xsrf_token": "XSRF token header (optional)",
+          "origin": "Origin header (optional)"
         }
       },
       "reauth_totp": {
-        "title": "Two-factor code",
-        "description": "Paste the Base32 TOTP secret for this account, or leave blank if it does not use one.",
+        "title": "Two-factor secret",
+        "description": "The stored two-factor secret is missing or was rejected. Paste the Base32 secret or otpauth:// link for this account.",
         "data": {
-          "totp_secret": "TOTP secret (Base32, optional)"
+          "totp_secret": "TOTP secret or otpauth:// link"
         }
       },
       "reconfigure_totp": {
-        "title": "Two-factor code",
-        "description": "Paste the Base32 TOTP secret for this account, or leave blank if it does not use one.",
+        "title": "Two-factor secret",
+        "description": "The stored two-factor secret is missing or was rejected. Paste the Base32 secret or otpauth:// link for this account.",
         "data": {
-          "totp_secret": "TOTP secret (Base32, optional)"
+          "totp_secret": "TOTP secret or otpauth:// link"
         }
       }
     },
     "error": {
       "cannot_connect": "Cannot connect. Check your credentials, cookie header and that the SIM is still on your account.",
-      "invalid_auth": "Mozillion rejected those credentials. Check the email, password and TOTP secret, then try again.",
-      "missing_auth": "Provide either email+password (and optional TOTP) or a cookie header."
+      "invalid_auth": "Mozillion rejected that email or password.",
+      "missing_auth": "Enter an email and password, or a cookie header.",
+      "invalid_totp": "Mozillion rejected the two-factor secret. Paste the Base32 secret or otpauth:// link again."
     },
     "abort": {
       "reauth_successful": "Re-authentication successful.",

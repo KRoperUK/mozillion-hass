@@ -3,14 +3,36 @@
     "step": {
       "user": {
         "title": "Mozillion",
-        "description": "Ceangail le Mozillion chun d'úsáid sonraí a fháil.",
+        "description": "Conas ba mhaith leat logáil isteach?",
+        "menu_options": {
+          "credentials": "Ríomhphost agus pasfhocal",
+          "session": "Fianán seisiúin an bhrabhsálaí"
+        }
+      },
+      "credentials": {
+        "title": "Logáil isteach i Mozillion",
+        "description": "Ní iarrfaidh Mozillion rún dhá fhachtóir ansin ach amháin má theastaíonn ceann ó do chuntas.",
         "data": {
           "email": "Ríomhphost",
           "password": "Pasfhocal",
           "origin": "Ceanntásc Origin (roghnach)",
-          "session_cookie": "Ceanntásc Cookie (roghnach má úsáideann tú logáil isteach)",
+          "scan_interval": "Eatramh iarratais (soicindí)"
+        }
+      },
+      "session": {
+        "title": "Úsáid seisiún brabhsálaí",
+        "description": "Logáil isteach i Mozillion i mbrabhsálaí, ansin cóipeáil an ceanntásc Cookie agus an comhartha XSRF óna uirlisí forbróra.",
+        "data": {
+          "session_cookie": "Ceanntásc Cookie",
           "xsrf_token": "Ceanntásc comhartha XSRF (roghnach)",
           "scan_interval": "Eatramh iarratais (soicindí)"
+        }
+      },
+      "totp": {
+        "title": "Rún dhá fhachtóir",
+        "description": "D'iarr Mozillion cód dhá fhachtóir. Greamaigh an rún Base32 nó an nasc otpauth:// a taispeánadh nuair a bhunaigh tú d'aip fíordheimhnithe. Coinníonn an comhtháthú é agus gineann sé na cóid féin.",
+        "data": {
+          "totp_secret": "Rún TOTP nó nasc otpauth://"
         }
       },
       "select_sim": {
@@ -36,7 +58,8 @@
           "email": "Ríomhphost",
           "password": "Pasfhocal",
           "session_cookie": "Ceanntásc Cookie (roghnach má úsáideann tú logáil isteach)",
-          "xsrf_token": "Ceanntásc comhartha XSRF (roghnach)"
+          "xsrf_token": "Ceanntásc comhartha XSRF (roghnach)",
+          "origin": "Ceanntásc Origin (roghnach)"
         }
       },
       "reconfigure_confirm": {
@@ -46,35 +69,30 @@
           "email": "Ríomhphost",
           "password": "Pasfhocal",
           "session_cookie": "Ceanntásc Cookie (roghnach má úsáideann tú logáil isteach)",
-          "xsrf_token": "Ceanntásc comhartha XSRF (roghnach)"
-        }
-      },
-      "totp": {
-        "title": "Cód dhá fhachtóir",
-        "description": "Má úsáideann do chuntas Mozillion aip fíordheimhnithe, greamaigh a rún Base32 le go bhféadfaidh an comhtháthú logáil isteach. Fág folamh mura n-úsáideann.",
-        "data": {
-          "totp_secret": "Rún TOTP (Base32, roghnach)"
+          "xsrf_token": "Ceanntásc comhartha XSRF (roghnach)",
+          "origin": "Ceanntásc Origin (roghnach)"
         }
       },
       "reauth_totp": {
-        "title": "Cód dhá fhachtóir",
-        "description": "Greamaigh rún TOTP Base32 an chuntais seo, nó fág folamh mura n-úsáideann sé ceann.",
+        "title": "Rún dhá fhachtóir",
+        "description": "Tá an rún dhá fhachtóir stóráilte ar iarraidh nó diúltaíodh dó. Greamaigh an rún Base32 nó an nasc otpauth:// don chuntas seo.",
         "data": {
-          "totp_secret": "Rún TOTP (Base32, roghnach)"
+          "totp_secret": "Rún TOTP nó nasc otpauth://"
         }
       },
       "reconfigure_totp": {
-        "title": "Cód dhá fhachtóir",
-        "description": "Greamaigh rún TOTP Base32 an chuntais seo, nó fág folamh mura n-úsáideann sé ceann.",
+        "title": "Rún dhá fhachtóir",
+        "description": "Tá an rún dhá fhachtóir stóráilte ar iarraidh nó diúltaíodh dó. Greamaigh an rún Base32 nó an nasc otpauth:// don chuntas seo.",
         "data": {
-          "totp_secret": "Rún TOTP (Base32, roghnach)"
+          "totp_secret": "Rún TOTP nó nasc otpauth://"
         }
       }
     },
     "error": {
       "cannot_connect": "Ní féidir ceangal. Seiceáil do dhintiúirí, an ceanntásc Cookie, agus go bhfuil an SIM fós ar do chuntas.",
-      "invalid_auth": "Dhiúltaigh Mozillion do na dintiúirí sin. Seiceáil an ríomhphost, an focal faire agus an rún TOTP, ansin triail arís.",
-      "missing_auth": "Tabhair ríomhphost agus pasfhocal (agus TOTP go roghnach), nó ceanntásc Cookie."
+      "invalid_auth": "Dhiúltaigh Mozillion don ríomhphost nó don phasfhocal sin.",
+      "missing_auth": "Cuir isteach ríomhphost agus pasfhocal, nó ceanntásc Cookie.",
+      "invalid_totp": "Dhiúltaigh Mozillion don rún dhá fhachtóir. Greamaigh an rún Base32 nó an nasc otpauth:// arís."
     },
     "abort": {
       "reauth_successful": "Athfhíorú déanta go rathúil.",
