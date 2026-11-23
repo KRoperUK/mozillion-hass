@@ -7,11 +7,8 @@ page, which is what lets one set of credentials cover every SIM.
 
 from __future__ import annotations
 
-import importlib
-import importlib.util
 import logging
 from collections.abc import Mapping
-from types import ModuleType
 from typing import Any
 
 from homeassistant import config_entries
@@ -26,6 +23,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
+from ._compat import schema
 from .api import (
     MozillionAuthError,
     MozillionChallengeError,
@@ -55,13 +53,6 @@ from .const import (
     SUBENTRY_TYPE_SIM,
 )
 from .session import has_credentials
-
-# Home Assistant 2026.10 replaced voluptuous with probatio for flow schemas.
-# hacs.json still declares 2026.6 as the minimum, so pick whichever the running
-# core provides rather than requiring the newest release.
-schema: ModuleType = importlib.import_module(
-    "probatio" if importlib.util.find_spec("probatio") else "voluptuous"
-)
 
 _LOGGER = logging.getLogger(__name__)
 
