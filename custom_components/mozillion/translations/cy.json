@@ -7,7 +7,6 @@
         "data": {
           "email": "E-bost",
           "password": "Cyfrinair",
-          "totp_secret": "Cyfrinair TOTP (Base32, dewisol)",
           "origin": "Pennawd Origin (dewisol)",
           "session_cookie": "Pennawd Cookie (dewisol os ydych yn mewngofnodi)",
           "xsrf_token": "Pennawd tocyn XSRF (dewisol)",
@@ -36,7 +35,6 @@
         "data": {
           "email": "E-bost",
           "password": "Cyfrinair",
-          "totp_secret": "Cyfrinair TOTP (Base32, dewisol)",
           "session_cookie": "Pennawd Cookie (dewisol os ydych yn mewngofnodi)",
           "xsrf_token": "Pennawd tocyn XSRF (dewisol)"
         }
@@ -47,9 +45,29 @@
         "data": {
           "email": "E-bost",
           "password": "Cyfrinair",
-          "totp_secret": "Cyfrinair TOTP (Base32, dewisol)",
           "session_cookie": "Pennawd Cookie (dewisol os ydych yn mewngofnodi)",
           "xsrf_token": "Pennawd tocyn XSRF (dewisol)"
+        }
+      },
+      "totp": {
+        "title": "Cod dau ffactor",
+        "description": "Os yw eich cyfrif Mozillion yn defnyddio ap dilysu, gludwch ei gyfrinach Base32 fel y gall yr integreiddio fewngofnodi. Gadewch yn wag os nad yw.",
+        "data": {
+          "totp_secret": "Cyfrinach TOTP (Base32, dewisol)"
+        }
+      },
+      "reauth_totp": {
+        "title": "Cod dau ffactor",
+        "description": "Gludwch gyfrinach TOTP Base32 y cyfrif hwn, neu gadewch yn wag os nad yw'n defnyddio un.",
+        "data": {
+          "totp_secret": "Cyfrinach TOTP (Base32, dewisol)"
+        }
+      },
+      "reconfigure_totp": {
+        "title": "Cod dau ffactor",
+        "description": "Gludwch gyfrinach TOTP Base32 y cyfrif hwn, neu gadewch yn wag os nad yw'n defnyddio un.",
+        "data": {
+          "totp_secret": "Cyfrinach TOTP (Base32, dewisol)"
         }
       }
     },

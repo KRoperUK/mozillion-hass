@@ -7,7 +7,6 @@
         "data": {
           "email": "Email",
           "password": "Password",
-          "totp_secret": "TOTP secret (Base32, optional)",
           "origin": "Origin header (optional)",
           "session_cookie": "Cookie header (optional if using login)",
           "xsrf_token": "XSRF token header (optional)",
@@ -36,7 +35,6 @@
         "data": {
           "email": "Email",
           "password": "Password",
-          "totp_secret": "TOTP secret (Base32, optional)",
           "session_cookie": "Cookie header (optional if using login)",
           "xsrf_token": "XSRF token header (optional)"
         }
@@ -47,9 +45,29 @@
         "data": {
           "email": "Email",
           "password": "Password",
-          "totp_secret": "TOTP secret (Base32, optional)",
           "session_cookie": "Cookie header (optional if using login)",
           "xsrf_token": "XSRF token header (optional)"
+        }
+      },
+      "totp": {
+        "title": "Two-factor code",
+        "description": "If your Mozillion account uses an authenticator app, paste its Base32 secret so the integration can sign in. Leave blank if it does not.",
+        "data": {
+          "totp_secret": "TOTP secret (Base32, optional)"
+        }
+      },
+      "reauth_totp": {
+        "title": "Two-factor code",
+        "description": "Paste the Base32 TOTP secret for this account, or leave blank if it does not use one.",
+        "data": {
+          "totp_secret": "TOTP secret (Base32, optional)"
+        }
+      },
+      "reconfigure_totp": {
+        "title": "Two-factor code",
+        "description": "Paste the Base32 TOTP secret for this account, or leave blank if it does not use one.",
+        "data": {
+          "totp_secret": "TOTP secret (Base32, optional)"
         }
       }
     },

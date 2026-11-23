@@ -7,7 +7,6 @@
         "data": {
           "email": "Adresse e-mail",
           "password": "Mot de passe",
-          "totp_secret": "Secret TOTP (Base32, facultatif)",
           "origin": "En-tête Origin (facultatif)",
           "session_cookie": "En-tête Cookie (facultatif si vous utilisez la connexion)",
           "xsrf_token": "En-tête du jeton XSRF (facultatif)",
@@ -36,7 +35,6 @@
         "data": {
           "email": "Adresse e-mail",
           "password": "Mot de passe",
-          "totp_secret": "Secret TOTP (Base32, facultatif)",
           "session_cookie": "En-tête Cookie (facultatif si vous utilisez la connexion)",
           "xsrf_token": "En-tête du jeton XSRF (facultatif)"
         }
@@ -47,9 +45,29 @@
         "data": {
           "email": "Adresse e-mail",
           "password": "Mot de passe",
-          "totp_secret": "Secret TOTP (Base32, facultatif)",
           "session_cookie": "En-tête Cookie (facultatif si vous utilisez la connexion)",
           "xsrf_token": "En-tête du jeton XSRF (facultatif)"
+        }
+      },
+      "totp": {
+        "title": "Code à deux facteurs",
+        "description": "Si votre compte Mozillion utilise une application d'authentification, collez son secret Base32 pour que l'intégration puisse se connecter. Laissez vide sinon.",
+        "data": {
+          "totp_secret": "Secret TOTP (Base32, facultatif)"
+        }
+      },
+      "reauth_totp": {
+        "title": "Code à deux facteurs",
+        "description": "Collez le secret TOTP Base32 de ce compte, ou laissez vide s'il n'en utilise pas.",
+        "data": {
+          "totp_secret": "Secret TOTP (Base32, facultatif)"
+        }
+      },
+      "reconfigure_totp": {
+        "title": "Code à deux facteurs",
+        "description": "Collez le secret TOTP Base32 de ce compte, ou laissez vide s'il n'en utilise pas.",
+        "data": {
+          "totp_secret": "Secret TOTP (Base32, facultatif)"
         }
       }
     },

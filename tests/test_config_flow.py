@@ -64,7 +64,6 @@ def _cookie_input(**overrides: Any) -> dict[str, Any]:
     base = {
         CONF_EMAIL: "",
         CONF_PASSWORD: "",
-        CONF_TOTP_SECRET: "",
         CONF_SESSION_COOKIE: "mozillion_session=abc; XSRF-TOKEN=xyz",
         CONF_XSRF_TOKEN: "xyz",
         CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
@@ -100,6 +99,19 @@ def _mock_client(
     return client
 
 
+async def _submit_login(hass: HomeAssistant, result: Any, data: dict[str, Any]):
+    """Submit a credentials form, then the TOTP step when the flow stages one."""
+
+    totp = {CONF_TOTP_SECRET: data.get(CONF_TOTP_SECRET, "")}
+    first = {k: v for k, v in data.items() if k != CONF_TOTP_SECRET}
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], first)
+    if result["type"] == data_entry_flow.FlowResultType.FORM and result[
+        "step_id"
+    ].endswith("totp"):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], totp)
+    return result
+
+
 async def _start_user_flow(hass: HomeAssistant):
     return await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
@@ -119,14 +131,64 @@ async def test_user_form_is_shown_first(hass: HomeAssistant) -> None:
     assert result["errors"] == {}
 
 
-async def test_login_success_offers_the_sim_list(hass: HomeAssistant) -> None:
+async def test_totp_secret_is_asked_for_after_email_and_password(
+    hass: HomeAssistant,
+) -> None:
+    client = _mock_client()
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        first = {k: v for k, v in _login_input().items() if k != CONF_TOTP_SECRET}
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], first
+        )
+
+        assert result["step_id"] == "totp"
+        assert list(result["data_schema"].schema) == [CONF_TOTP_SECRET]
+        client.async_login.assert_not_called()
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_TOTP_SECRET: "JBSWY3DPEHPK3PXP"}
+        )
+
+    assert result["step_id"] == "select_sim"
+    assert client.async_login.await_args.kwargs["totp_secret"] == "JBSWY3DPEHPK3PXP"
+
+
+async def test_cookie_only_submission_skips_the_totp_step(
+    hass: HomeAssistant,
+) -> None:
     client = _mock_client()
 
     with patch(CLIENT, return_value=client):
         result = await _start_user_flow(hass)
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _login_input()
+            result["flow_id"], _cookie_input()
         )
+
+    assert result["step_id"] == "select_sim"
+    client.async_login.assert_not_called()
+
+
+async def test_rejected_login_after_totp_returns_to_the_credentials_form(
+    hass: HomeAssistant,
+) -> None:
+    client = _mock_client(login_error=MozillionAuthError("bad code"))
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await _submit_login(hass, result, _login_input())
+
+    assert result["step_id"] == "user"
+    assert result["errors"]["base"] == "invalid_auth"
+
+
+async def test_login_success_offers_the_sim_list(hass: HomeAssistant) -> None:
+    client = _mock_client()
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await _submit_login(hass, result, _login_input())
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "select_sim"
@@ -140,9 +202,7 @@ async def test_selecting_a_sim_creates_the_entry(hass: HomeAssistant) -> None:
 
     with patch(CLIENT, return_value=client):
         result = await _start_user_flow(hass)
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _login_input()
-        )
+        result = await _submit_login(hass, result, _login_input())
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], {"sim": MOCK_SIM.display_name}
         )
@@ -175,17 +235,13 @@ async def test_entry_is_unique_per_account(hass: HomeAssistant) -> None:
 
     with patch(CLIENT, return_value=client):
         first = await _start_user_flow(hass)
-        first = await hass.config_entries.flow.async_configure(
-            first["flow_id"], _login_input()
-        )
+        first = await _submit_login(hass, first, _login_input())
         await hass.config_entries.flow.async_configure(
             first["flow_id"], {"sim": MOCK_SIM.display_name}
         )
 
         second = await _start_user_flow(hass)
-        second = await hass.config_entries.flow.async_configure(
-            second["flow_id"], _login_input()
-        )
+        second = await _submit_login(hass, second, _login_input())
 
     # The account is recognised at the login step, before any SIM is chosen: the
     # extra SIM belongs on the entry that already exists.
@@ -205,9 +261,7 @@ async def test_failed_login_shows_invalid_auth(hass: HomeAssistant) -> None:
 
     with patch(CLIENT, return_value=client):
         result = await _start_user_flow(hass)
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _login_input()
-        )
+        result = await _submit_login(hass, result, _login_input())
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "user"
@@ -223,9 +277,7 @@ async def test_a_network_failure_still_shows_cannot_connect(
 
     with patch(CLIENT, return_value=client):
         result = await _start_user_flow(hass)
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _login_input()
-        )
+        result = await _submit_login(hass, result, _login_input())
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "user"
@@ -239,9 +291,8 @@ async def test_no_credentials_and_no_cookie_shows_missing_auth(
 
     with patch(CLIENT, return_value=client):
         result = await _start_user_flow(hass)
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            _login_input(**{CONF_EMAIL: "", CONF_PASSWORD: ""}),
+        result = await _submit_login(
+            hass, result, _login_input(**{CONF_EMAIL: "", CONF_PASSWORD: ""})
         )
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
@@ -256,9 +307,7 @@ async def test_unreadable_sim_list_falls_back_to_manual_ids(
 
     with patch(CLIENT, return_value=client):
         result = await _start_user_flow(hass)
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _login_input()
-        )
+        result = await _submit_login(hass, result, _login_input())
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "manual_ids"
@@ -283,9 +332,7 @@ async def test_flow_builds_its_client_on_a_dedicated_session(
         ) as session,
     ):
         result = await _start_user_flow(hass)
-        await hass.config_entries.flow.async_configure(
-            result["flow_id"], _login_input()
-        )
+        await _submit_login(hass, result, _login_input())
 
     session.assert_called_once_with(hass)
 
@@ -306,17 +353,13 @@ async def test_a_retried_login_reuses_the_flow_session(hass: HomeAssistant) -> N
         ) as session,
     ):
         result = await _start_user_flow(hass)
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _login_input()
-        )
+        result = await _submit_login(hass, result, _login_input())
         assert result["errors"]["base"] == "invalid_auth"
 
         client.async_login = AsyncMock(
             return_value=("mozillion_session=abc; XSRF-TOKEN=xyz", "xyz")
         )
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _login_input()
-        )
+        result = await _submit_login(hass, result, _login_input())
 
     assert result["step_id"] == "select_sim"
     session.assert_called_once_with(hass)
@@ -432,9 +475,7 @@ async def test_reauth_shows_invalid_auth_for_rejected_credentials(
         )
         assert result["step_id"] == "reauth_confirm"
 
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _credentials_only(_login_input())
-        )
+        result = await _submit_login(hass, result, _credentials_only(_login_input()))
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["errors"]["base"] == "invalid_auth"
@@ -461,9 +502,7 @@ async def test_reauth_shows_cannot_connect_for_a_network_failure(
                 "entry_id": entry.entry_id,
             },
         )
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _credentials_only(_login_input())
-        )
+        result = await _submit_login(hass, result, _credentials_only(_login_input()))
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["errors"]["base"] == "cannot_connect"
@@ -601,9 +640,7 @@ async def test_reconfigure_updates_credentials_and_keeps_the_sims(
         )
         assert result["step_id"] == "reconfigure_confirm"
 
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _credentials_only(_login_input())
-        )
+        result = await _submit_login(hass, result, _credentials_only(_login_input()))
 
     assert result["type"] == data_entry_flow.FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
@@ -634,9 +671,7 @@ async def test_reconfigure_shows_invalid_auth_for_rejected_credentials(
                 "entry_id": entry.entry_id,
             },
         )
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _credentials_only(_login_input())
-        )
+        result = await _submit_login(hass, result, _credentials_only(_login_input()))
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "reconfigure_confirm"
@@ -664,9 +699,7 @@ async def test_reconfigure_shows_cannot_connect_for_a_network_failure(
                 "entry_id": entry.entry_id,
             },
         )
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], _credentials_only(_login_input())
-        )
+        result = await _submit_login(hass, result, _credentials_only(_login_input()))
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "reconfigure_confirm"
