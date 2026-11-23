@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import date
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -1030,14 +1031,20 @@ def _challenged() -> MagicMock:
     return _response(text="Just a moment...", status=403, headers=CHALLENGE)
 
 
-def _solved(cookies: list[str] | None = None, ua: str = "Solver/1.0") -> MagicMock:
+def _solved(
+    cookies: list[str] | None = None,
+    ua: str = "Solver/1.0",
+    expires: float = -1,
+) -> MagicMock:
     names = ["cf_clearance"] if cookies is None else cookies
     return _response(
         json_data={
             "status": "ok",
             "solution": {
                 "userAgent": ua,
-                "cookies": [{"name": n, "value": f"{n}-value"} for n in names],
+                "cookies": [
+                    {"name": n, "value": f"{n}-value", "expiry": expires} for n in names
+                ],
             },
         }
     )
@@ -1127,3 +1134,73 @@ class TestChallenge:
 
         with pytest.raises(MozillionSolverError, match="Could not reach"):
             await client.async_login("user@example.com", "pass123")
+
+    @pytest.mark.asyncio
+    async def test_the_clearance_expiry_is_recorded(self) -> None:
+        session = _session(post_responses=(_solved(expires=2_000_000_000.5),))
+        client = MozillionClient(session, flaresolverr_url=SOLVER_URL)
+
+        await client.async_solve_challenge(BASE_URL)
+
+        assert client.clearance_expires_at == 2_000_000_000.5
+
+    @pytest.mark.asyncio
+    async def test_a_cookie_without_an_expiry_is_unknown(self) -> None:
+        session = _session(post_responses=(_solved(expires=-1),))
+        client = MozillionClient(session, flaresolverr_url=SOLVER_URL)
+
+        await client.async_solve_challenge(BASE_URL)
+
+        assert client.clearance_expires_at is None
+
+    @pytest.mark.asyncio
+    async def test_an_expiring_clearance_is_renewed_before_login(self) -> None:
+        session = _session(
+            get_responses=(_response(text=LOGIN_PAGE),),
+            post_responses=(
+                _solved(),
+                _response(text="<html>dashboard</html>", url=f"{BASE_URL}/home"),
+            ),
+            cookies={"mozillion_session": "abc", "XSRF-TOKEN": "xyz"},
+        )
+        client = MozillionClient(session, flaresolverr_url=SOLVER_URL)
+        client.clearance_expires_at = time.time() + 60
+
+        await client.async_login("user@example.com", "pass123")
+
+        assert session.post.call_args_list[0].args[0] == SOLVER_URL
+
+    @pytest.mark.asyncio
+    async def test_a_healthy_clearance_is_left_alone(self) -> None:
+        session = _session(
+            get_responses=(_response(text=LOGIN_PAGE),),
+            post_responses=(
+                _response(text="<html>dashboard</html>", url=f"{BASE_URL}/home"),
+            ),
+            cookies={"mozillion_session": "abc", "XSRF-TOKEN": "xyz"},
+        )
+        client = MozillionClient(session, flaresolverr_url=SOLVER_URL)
+        client.clearance_expires_at = time.time() + 86400
+
+        await client.async_login("user@example.com", "pass123")
+
+        assert session.post.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_a_failed_renewal_does_not_fail_the_login(self) -> None:
+        failed = _response(json_data={"status": "error", "message": "down"})
+        session = _session(
+            get_responses=(_response(text=LOGIN_PAGE),),
+            post_responses=(
+                failed,
+                _response(text="<html>dashboard</html>", url=f"{BASE_URL}/home"),
+            ),
+            cookies={"mozillion_session": "abc", "XSRF-TOKEN": "xyz"},
+        )
+        client = MozillionClient(session, flaresolverr_url=SOLVER_URL)
+        client.clearance_expires_at = time.time() + 60
+
+        await client.async_login("user@example.com", "pass123")
+
+        # Forgotten, so a broken solver is not retried on every poll.
+        assert client.clearance_expires_at is None
