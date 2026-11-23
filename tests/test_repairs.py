@@ -7,18 +7,25 @@ unavailable entities.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from aiohttp import ClientSession
 from custom_components.mozillion import MozillionAuthError
-from custom_components.mozillion.api import MozillionClient
+from custom_components.mozillion.api import (
+    MozillionChallengeError,
+    MozillionClient,
+    MozillionSolverError,
+)
 from custom_components.mozillion.const import (
     ATTR_SIM_STATUS,
     ATTR_USAGE,
+    CONF_FLARESOLVERR_URL,
     DASHBOARD_PATH,
     DOMAIN,
+    ISSUE_CLOUDFLARE_BLOCKED,
     ISSUE_DASHBOARD_UNREADABLE,
     REPAIR_FAILURE_THRESHOLD,
     SUBENTRY_TYPE_SIM,
@@ -27,14 +34,20 @@ from custom_components.mozillion.coordinator import (
     MozillionCoordinator,
     MozillionDashboard,
 )
+from custom_components.mozillion.repairs import (
+    CloudflareBlockedRepairFlow,
+    async_create_fix_flow,
+)
 from custom_components.mozillion.session import MozillionSession
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from tests.conftest import (
     MOCK_API_RESPONSE,
     MOCK_ENTRY_DATA_COOKIE,
+    MOCK_ENTRY_DATA_LOGIN,
     MOCK_SIM,
     MOCK_WALLET,
     _make_config_entry,
@@ -428,3 +441,202 @@ class TestDashboardClassification:
         assert issue is not None
         assert "No SIMs found" in issue.translation_placeholders["error"]
         assert coordinator._dashboard_failures == REPAIR_FAILURE_THRESHOLD
+
+
+# ---------------------------------------------------------------------------
+# Cloudflare repair
+# ---------------------------------------------------------------------------
+
+
+def _blocked_issue(hass: HomeAssistant, entry: Any):
+    return ir.async_get(hass).async_get_issue(
+        DOMAIN, f"{ISSUE_CLOUDFLARE_BLOCKED}_{entry.entry_id}"
+    )
+
+
+def _challenged_coordinator(
+    hass: HomeAssistant, data: dict[str, Any]
+) -> tuple[MozillionCoordinator, AsyncMock, Any]:
+    entry = _make_config_entry(data=data)
+    entry.add_to_hass(hass)
+
+    client = AsyncMock()
+    client.has_solver = False
+    client.async_get_usage.return_value = MOCK_API_RESPONSE
+    client.async_fetch_sims.return_value = [MOCK_SIM]
+    client.async_fetch_overspend.return_value = MOCK_WALLET
+
+    session = MozillionSession(cookie_header="mozillion_session=abc", xsrf_token="xyz")
+    session.authenticated_at = time.monotonic()
+    coordinator = MozillionCoordinator(
+        hass=hass,
+        client=client,
+        entry=entry,
+        subentry=sim_subentry(entry),
+        session=session,
+        dashboard=MozillionDashboard(client=client, session=session),
+        update_interval=None,
+    )
+    return coordinator, client, entry
+
+
+class TestCloudflareRepair:
+    async def test_a_challenged_poll_raises_a_fixable_repair(
+        self, hass: HomeAssistant
+    ) -> None:
+        coordinator, client, entry = _challenged_coordinator(
+            hass, MOCK_ENTRY_DATA_LOGIN
+        )
+        client.async_get_usage.side_effect = MozillionChallengeError("challenged")
+
+        with pytest.raises(UpdateFailed):
+            await coordinator._async_update_data()
+
+        issue = _blocked_issue(hass, entry)
+        assert issue is not None
+        assert issue.is_fixable is True
+        assert issue.translation_key == ISSUE_CLOUDFLARE_BLOCKED
+        assert issue.data == {"entry_id": entry.entry_id}
+
+    async def test_a_cookie_only_account_gets_advice_not_a_fix_flow(
+        self, hass: HomeAssistant
+    ) -> None:
+        coordinator, client, entry = _challenged_coordinator(
+            hass, MOCK_ENTRY_DATA_COOKIE
+        )
+        client.async_get_usage.side_effect = MozillionChallengeError("challenged")
+
+        with pytest.raises(UpdateFailed):
+            await coordinator._async_update_data()
+
+        issue = _blocked_issue(hass, entry)
+        assert issue is not None
+        assert issue.is_fixable is False
+        assert issue.translation_key == f"{ISSUE_CLOUDFLARE_BLOCKED}_cookie"
+
+    async def test_a_poll_that_gets_through_withdraws_the_repair(
+        self, hass: HomeAssistant
+    ) -> None:
+        coordinator, client, entry = _challenged_coordinator(
+            hass, MOCK_ENTRY_DATA_LOGIN
+        )
+        client.async_get_usage.side_effect = [
+            MozillionChallengeError("challenged"),
+            MOCK_API_RESPONSE,
+        ]
+
+        with pytest.raises(UpdateFailed):
+            await coordinator._async_update_data()
+        assert _blocked_issue(hass, entry) is not None
+
+        await coordinator._async_update_data()
+
+        assert _blocked_issue(hass, entry) is None
+
+    async def test_a_solver_that_clears_the_challenge_raises_no_repair(
+        self, hass: HomeAssistant
+    ) -> None:
+        coordinator, client, entry = _challenged_coordinator(
+            hass, MOCK_ENTRY_DATA_LOGIN
+        )
+        client.has_solver = True
+        client.async_login.return_value = ("fresh", "xsrf")
+        client.async_get_usage.side_effect = [
+            MozillionChallengeError("challenged"),
+            MOCK_API_RESPONSE,
+        ]
+
+        await coordinator._async_update_data()
+
+        assert _blocked_issue(hass, entry) is None
+
+    async def test_a_solver_that_fails_still_raises_the_repair(
+        self, hass: HomeAssistant
+    ) -> None:
+        coordinator, client, entry = _challenged_coordinator(
+            hass, MOCK_ENTRY_DATA_LOGIN
+        )
+        client.has_solver = True
+        client.async_login.side_effect = MozillionSolverError("solver down")
+        client.async_get_usage.side_effect = MozillionChallengeError("challenged")
+
+        with pytest.raises(UpdateFailed):
+            await coordinator._async_update_data()
+
+        assert _blocked_issue(hass, entry) is not None
+
+
+class TestCloudflareFixFlow:
+    URL = "http://flaresolverr:8191/v1"
+
+    def _flow(self, hass: HomeAssistant, entry_id: str) -> CloudflareBlockedRepairFlow:
+        flow = CloudflareBlockedRepairFlow(entry_id, "cloudflare_blocked_x")
+        flow.hass = hass
+        return flow
+
+    async def test_a_working_address_is_saved_and_the_account_reloaded(
+        self, hass: HomeAssistant
+    ) -> None:
+        entry = _make_config_entry(data=MOCK_ENTRY_DATA_LOGIN)
+        entry.add_to_hass(hass)
+        flow = self._flow(hass, entry.entry_id)
+
+        with (
+            patch.object(
+                MozillionClient, "async_solve_challenge", new=AsyncMock()
+            ) as solve,
+            patch.object(
+                hass.config_entries, "async_reload", new=AsyncMock()
+            ) as reload,
+        ):
+            result = await flow.async_step_solver({CONF_FLARESOLVERR_URL: self.URL})
+
+        assert result["type"] == "create_entry"
+        solve.assert_awaited_once()
+        assert entry.data[CONF_FLARESOLVERR_URL] == self.URL
+        reload.assert_awaited_once_with(entry.entry_id)
+
+    async def test_an_address_that_cannot_solve_is_not_saved(
+        self, hass: HomeAssistant
+    ) -> None:
+        entry = _make_config_entry(data=MOCK_ENTRY_DATA_LOGIN)
+        entry.add_to_hass(hass)
+        flow = self._flow(hass, entry.entry_id)
+
+        with patch.object(
+            MozillionClient,
+            "async_solve_challenge",
+            new=AsyncMock(side_effect=MozillionSolverError("down")),
+        ):
+            result = await flow.async_step_solver({CONF_FLARESOLVERR_URL: self.URL})
+
+        assert result["type"] == "form"
+        assert result["errors"] == {"base": "solver_failed"}
+        assert CONF_FLARESOLVERR_URL not in entry.data
+
+    async def test_the_form_is_prefilled_with_the_stored_address(
+        self, hass: HomeAssistant
+    ) -> None:
+        entry = _make_config_entry(
+            data={**MOCK_ENTRY_DATA_LOGIN, CONF_FLARESOLVERR_URL: self.URL}
+        )
+        entry.add_to_hass(hass)
+
+        result = await self._flow(hass, entry.entry_id).async_step_init()
+
+        assert result["step_id"] == "solver"
+        key = next(iter(result["data_schema"].schema))
+        assert key.description == {"suggested_value": self.URL}
+
+    async def test_a_removed_account_aborts(self, hass: HomeAssistant) -> None:
+        result = await self._flow(hass, "gone").async_step_init()
+
+        assert result["type"] == "abort"
+        assert result["reason"] == "entry_missing"
+
+    async def test_the_platform_hands_back_the_flow(self, hass: HomeAssistant) -> None:
+        flow = await async_create_fix_flow(
+            hass, "cloudflare_blocked_x", {"entry_id": "abc"}
+        )
+
+        assert isinstance(flow, CloudflareBlockedRepairFlow)

@@ -200,6 +200,30 @@
     "dashboard_unreadable": {
       "title": "Methu darllen bwrdd dangos Mozillion",
       "description": "Ni lwyddwyd i ddarllen bwrdd dangos {entry} am {attempts} cylch yn olynol, felly nid yw'r pecyn, statws y gwasanaeth na'r dyddiad ailosod ar gael.\n\nGwall diwethaf: {error}\n\nFel arfer mae hyn yn golygu bod Mozillion wedi newid ei dudalen, er bod problem mewngofnodi neu rwydwaith yn edrych yr un fath. Nid yw'r defnydd data ei hun yn cael ei effeithio."
+    },
+    "cloudflare_blocked": {
+      "title": "Mae Cloudflare yn rhwystro Mozillion",
+      "fix_flow": {
+        "step": {
+          "solver": {
+            "title": "Clirio her Cloudflare",
+            "description": "Mae Cloudflare yn rhwystro {entry}, felly ni ellir darllen y defnydd data.\n\nGwall diwethaf: {error}\n\nRhowch gyfeiriad FlareSolverr sy'n rhedeg ar yr un rhwydwaith â Home Assistant, er enghraifft http://flaresolverr:8191/v1. Caiff ei brofi cyn ei gadw.",
+            "data": {
+              "flaresolverr_url": "Cyfeiriad FlareSolverr"
+            }
+          }
+        },
+        "error": {
+          "solver_failed": "Ni allai FlareSolverr glirio her Cloudflare. Gwiriwch y cyfeiriad, a'i fod yn rhedeg ar yr un rhwydwaith â Home Assistant."
+        },
+        "abort": {
+          "entry_missing": "Nid yw'r cyfrif Mozillion hwn yn bodoli mwyach."
+        }
+      }
+    },
+    "cloudflare_blocked_cookie": {
+      "title": "Mae Cloudflare yn rhwystro Mozillion",
+      "description": "Mae Cloudflare yn rhwystro {entry}, felly ni ellir darllen y defnydd data.\n\nGwall diwethaf: {error}\n\nMae'r cyfrif hwn yn mewngofnodi gyda sesiwn porwr, na all glirio'r her ei hun. Agorwch yr integreiddio, dewiswch Ail-ffurfweddu, a gludwch bennawd Cookie newydd o borwr sy'n gallu cyrraedd Mozillion. I osgoi hyn yn y dyfodol, ail-ffurfweddwch gyda'ch e-bost a'ch cyfrinair a sefydlwch FlareSolverr."
     }
   }
 }

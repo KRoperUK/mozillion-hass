@@ -65,6 +65,7 @@ from .const import (
     CONF_XSRF_TOKEN,
     DASHBOARD_REFRESH_INTERVAL,
     DOMAIN,
+    ISSUE_CLOUDFLARE_BLOCKED,
     ISSUE_DASHBOARD_UNREADABLE,
     REPAIR_FAILURE_THRESHOLD,
     SUBENTRY_TYPE_SIM,
@@ -443,6 +444,7 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
             _LOGGER.error("Update failed: %s", err)
             raise UpdateFailed(err) from err
 
+        self._clear_challenge_repair()
         data = _build_coordinator_data(raw, sim=sim, wallet=wallet)
 
         _LOGGER.debug(
@@ -473,6 +475,7 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         if not (self.client.has_solver and has_credentials(self.entry)):
             _LOGGER.error("Update failed: %s", error)
+            self._raise_challenge_repair(error)
             raise UpdateFailed(error) from error
 
         _LOGGER.warning("Cloudflare challenged the poll; clearing it with FlareSolverr")
@@ -485,7 +488,46 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 "Mozillion rejected the configured credentials"
             ) from retry_error
         except RuntimeError as retry_error:
+            self._raise_challenge_repair(retry_error)
             raise UpdateFailed(retry_error) from retry_error
+
+    def _raise_challenge_repair(self, error: Exception) -> None:
+        """Tell the user Cloudflare is blocking the integration, and how to fix it.
+
+        One issue per account. It is fixable when the entry can log in on its own,
+        because the fix is to point it at a FlareSolverr; a cookie-only entry has
+        to be given a fresh browser session instead.
+        """
+
+        self.session.challenge_issue_active = True
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            f"{ISSUE_CLOUDFLARE_BLOCKED}_{self.entry.entry_id}",
+            data={"entry_id": self.entry.entry_id},
+            is_fixable=has_credentials(self.entry),
+            is_persistent=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key=(
+                ISSUE_CLOUDFLARE_BLOCKED
+                if has_credentials(self.entry)
+                else f"{ISSUE_CLOUDFLARE_BLOCKED}_cookie"
+            ),
+            translation_placeholders={
+                "entry": self.entry.title,
+                "error": str(error)[:200],
+            },
+        )
+
+    def _clear_challenge_repair(self) -> None:
+        """Withdraw the Cloudflare repair once a poll gets through."""
+
+        if not self.session.challenge_issue_active:
+            return
+        self.session.challenge_issue_active = False
+        ir.async_delete_issue(
+            self.hass, DOMAIN, f"{ISSUE_CLOUDFLARE_BLOCKED}_{self.entry.entry_id}"
+        )
 
     async def _async_retry_after_auth_error(
         self, error: MozillionAuthError

@@ -56,6 +56,9 @@ DASHBOARD_REFRESH_INTERVAL = 21600  # 6 hours, in seconds
 # single blip does not nag the user.
 REPAIR_FAILURE_THRESHOLD = 3
 ISSUE_DASHBOARD_UNREADABLE = "dashboard_unreadable"
+# One per account (the entry id is appended), because the fix is a setting on
+# the entry: where FlareSolverr lives.
+ISSUE_CLOUDFLARE_BLOCKED = "cloudflare_blocked"
 
 ATTR_RAW = "raw"
 ATTR_USAGE = "usage"

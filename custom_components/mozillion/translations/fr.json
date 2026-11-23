@@ -200,6 +200,30 @@
     "dashboard_unreadable": {
       "title": "Impossible de lire le tableau de bord Mozillion",
       "description": "Le tableau de bord de {entry} n'a pas pu être lu pendant {attempts} cycles consécutifs ; les données de forfait, d'état du service et de date de réinitialisation sont donc indisponibles.\n\nDernière erreur : {error}\n\nCela signifie généralement que Mozillion a modifié sa page, mais un problème de connexion ou de réseau produit le même effet. La consommation de données n'est pas affectée."
+    },
+    "cloudflare_blocked": {
+      "title": "Cloudflare bloque Mozillion",
+      "fix_flow": {
+        "step": {
+          "solver": {
+            "title": "Franchir le défi de Cloudflare",
+            "description": "Cloudflare bloque {entry}, la consommation de données ne peut donc pas être lue.\n\nDernière erreur : {error}\n\nSaisissez l'adresse d'un FlareSolverr exécuté sur le même réseau que Home Assistant, par exemple http://flaresolverr:8191/v1. Elle est testée avant d'être enregistrée.",
+            "data": {
+              "flaresolverr_url": "Adresse de FlareSolverr"
+            }
+          }
+        },
+        "error": {
+          "solver_failed": "FlareSolverr n'a pas pu franchir le défi de Cloudflare. Vérifiez l'adresse, et qu'il tourne sur le même réseau que Home Assistant."
+        },
+        "abort": {
+          "entry_missing": "Ce compte Mozillion n'existe plus."
+        }
+      }
+    },
+    "cloudflare_blocked_cookie": {
+      "title": "Cloudflare bloque Mozillion",
+      "description": "Cloudflare bloque {entry}, la consommation de données ne peut donc pas être lue.\n\nDernière erreur : {error}\n\nCe compte se connecte avec une session de navigateur, qui ne peut pas franchir seule le défi. Ouvrez l'intégration, choisissez Reconfigurer et collez un en-tête Cookie récent depuis un navigateur qui accède à Mozillion. Pour éviter cela à l'avenir, reconfigurez avec votre adresse e-mail et votre mot de passe, et installez FlareSolverr."
     }
   }
 }

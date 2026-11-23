@@ -200,6 +200,30 @@
     "dashboard_unreadable": {
       "title": "Ní féidir deais Mozillion a léamh",
       "description": "Níorbh fhéidir deais {entry} a léamh ar feadh {attempts} timthriall as a chéile, mar sin níl an plean, stádas an tseirbhís ná an dáta athshocraithe ar fáil.\n\nAn earráid dheireanach: {error}\n\nDe ghnáth ciallaíonn sé seo gur athraigh Mozillion a leathanach, cé go bhfuil cuma chomhionann ar fhadhb logála isteach nó líonra. Níl tionchar ar an úsáid sonraí féin."
+    },
+    "cloudflare_blocked": {
+      "title": "Tá Cloudflare ag blocáil Mozillion",
+      "fix_flow": {
+        "step": {
+          "solver": {
+            "title": "Dúshlán Cloudflare a ghlanadh",
+            "description": "Tá Cloudflare ag blocáil {entry}, mar sin ní féidir úsáid sonraí a léamh.\n\nAn earráid dheireanach: {error}\n\nCuir isteach seoladh FlareSolverr atá ag rith ar an líonra céanna le Home Assistant, mar shampla http://flaresolverr:8191/v1. Déantar é a thástáil sula sábháiltear é.",
+            "data": {
+              "flaresolverr_url": "Seoladh FlareSolverr"
+            }
+          }
+        },
+        "error": {
+          "solver_failed": "Níor éirigh le FlareSolverr dúshlán Cloudflare a ghlanadh. Seiceáil an seoladh, agus go bhfuil sé ar an líonra céanna le Home Assistant."
+        },
+        "abort": {
+          "entry_missing": "Níl an cuntas Mozillion seo ann a thuilleadh."
+        }
+      }
+    },
+    "cloudflare_blocked_cookie": {
+      "title": "Tá Cloudflare ag blocáil Mozillion",
+      "description": "Tá Cloudflare ag blocáil {entry}, mar sin ní féidir úsáid sonraí a léamh.\n\nAn earráid dheireanach: {error}\n\nLogálann an cuntas seo isteach le seisiún brabhsálaí, nach féidir leis an dúshlán a ghlanadh leis féin. Oscail an comhtháthú, roghnaigh Athchumraigh, agus greamaigh ceanntásc Cookie úr ó bhrabhsálaí a shroicheann Mozillion. Chun é seo a sheachaint amach anseo, athchumraigh le do ríomhphost agus do phasfhocal agus socraigh FlareSolverr."
     }
   }
 }

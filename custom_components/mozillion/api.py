@@ -168,7 +168,7 @@ class MozillionClient:
             if not self.flaresolverr_url:
                 raise
             _LOGGER.debug("Cloudflare challenge on login; asking FlareSolverr")
-            await self._async_solve_challenge(origin)
+            await self.async_solve_challenge(origin)
             return await self._async_login_once(email, password, totp_secret, origin)
 
     async def _async_login_once(
@@ -221,7 +221,7 @@ class MozillionClient:
         )
         return cookie_header, xsrf
 
-    async def _async_solve_challenge(self, origin: str) -> None:
+    async def async_solve_challenge(self, origin: str) -> None:
         """Clear Cloudflare's challenge through FlareSolverr.
 
         FlareSolverr drives a real browser to the login page. Its cookies

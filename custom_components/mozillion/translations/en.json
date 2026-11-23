@@ -200,6 +200,30 @@
     "dashboard_unreadable": {
       "title": "Mozillion dashboard cannot be read",
       "description": "The dashboard for {entry} could not be read for {attempts} consecutive polls, so the plan, service status and reset date are unavailable.\n\nLast error: {error}\n\nThis usually means Mozillion has changed their page markup, though a login or network problem looks the same. Data usage itself is unaffected."
+    },
+    "cloudflare_blocked": {
+      "title": "Cloudflare is blocking Mozillion",
+      "fix_flow": {
+        "step": {
+          "solver": {
+            "title": "Clear Cloudflare's challenge",
+            "description": "Cloudflare is blocking {entry}, so data usage cannot be read.\n\nLast error: {error}\n\nEnter the address of a FlareSolverr running on the same network as Home Assistant, for example http://flaresolverr:8191/v1. It is tested before it is saved.",
+            "data": {
+              "flaresolverr_url": "FlareSolverr address"
+            }
+          }
+        },
+        "error": {
+          "solver_failed": "FlareSolverr could not clear Cloudflare's challenge. Check the address, and that it runs on the same network as Home Assistant."
+        },
+        "abort": {
+          "entry_missing": "This Mozillion account no longer exists."
+        }
+      }
+    },
+    "cloudflare_blocked_cookie": {
+      "title": "Cloudflare is blocking Mozillion",
+      "description": "Cloudflare is blocking {entry}, so data usage cannot be read.\n\nLast error: {error}\n\nThis account signs in with a browser session, which cannot clear the challenge itself. Open the integration, choose Reconfigure, and paste a fresh cookie header from a browser that can reach Mozillion. To avoid this in future, reconfigure with your email and password and set up FlareSolverr."
     }
   }
 }
