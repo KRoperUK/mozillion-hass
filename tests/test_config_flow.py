@@ -6,7 +6,12 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from custom_components.mozillion.api import MozillionAuthError
+from custom_components.mozillion.api import (
+    MozillionAuthError,
+    MozillionTotpSecretError,
+    MozillionTwoFactorRejected,
+    MozillionTwoFactorRequired,
+)
 from custom_components.mozillion.const import (
     CONF_EMAIL,
     CONF_ICCID,
@@ -51,9 +56,6 @@ def _login_input(**overrides: Any) -> dict[str, Any]:
     base = {
         CONF_EMAIL: "user@example.com",
         CONF_PASSWORD: "secret123",
-        CONF_TOTP_SECRET: "",
-        CONF_SESSION_COOKIE: "",
-        CONF_XSRF_TOKEN: "",
         CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
     }
     base.update(overrides)
@@ -62,8 +64,6 @@ def _login_input(**overrides: Any) -> dict[str, Any]:
 
 def _cookie_input(**overrides: Any) -> dict[str, Any]:
     base = {
-        CONF_EMAIL: "",
-        CONF_PASSWORD: "",
         CONF_SESSION_COOKIE: "mozillion_session=abc; XSRF-TOKEN=xyz",
         CONF_XSRF_TOKEN: "xyz",
         CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
@@ -99,22 +99,29 @@ def _mock_client(
     return client
 
 
-async def _submit_login(hass: HomeAssistant, result: Any, data: dict[str, Any]):
-    """Submit a credentials form, then the TOTP step when the flow stages one."""
+async def _submit_login(
+    hass: HomeAssistant, result: Any, data: dict[str, Any], totp: str | None = None
+):
+    """Submit a sign-in form, then the 2FA form when Mozillion asks for one."""
 
-    totp = {CONF_TOTP_SECRET: data.get(CONF_TOTP_SECRET, "")}
-    first = {k: v for k, v in data.items() if k != CONF_TOTP_SECRET}
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], first)
-    if result["type"] == data_entry_flow.FlowResultType.FORM and result[
-        "step_id"
-    ].endswith("totp"):
-        result = await hass.config_entries.flow.async_configure(result["flow_id"], totp)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], data)
+    if totp is not None and result["step_id"].endswith("totp"):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_TOTP_SECRET: totp}
+        )
     return result
 
 
-async def _start_user_flow(hass: HomeAssistant):
-    return await hass.config_entries.flow.async_init(
+async def _start_user_flow(hass: HomeAssistant, mode: str | None = "credentials"):
+    """Start the flow and, unless ``mode`` is None, pick a sign-in method."""
+
+    result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    if mode is None:
+        return result
+    return await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": mode}
     )
 
 
@@ -123,29 +130,35 @@ async def _start_user_flow(hass: HomeAssistant):
 # ---------------------------------------------------------------------------
 
 
-async def test_user_form_is_shown_first(hass: HomeAssistant) -> None:
-    result = await _start_user_flow(hass)
+async def test_user_step_offers_a_choice_of_sign_in_method(
+    hass: HomeAssistant,
+) -> None:
+    result = await _start_user_flow(hass, mode=None)
 
-    assert result["type"] == data_entry_flow.FlowResultType.FORM
-    assert result["step_id"] == "user"
-    assert result["errors"] == {}
+    assert result["type"] == data_entry_flow.FlowResultType.MENU
+    assert result["menu_options"] == ["credentials", "session"]
 
 
-async def test_totp_secret_is_asked_for_after_email_and_password(
+async def test_two_factor_is_only_asked_for_when_mozillion_demands_it(
     hass: HomeAssistant,
 ) -> None:
     client = _mock_client()
+    client.async_login = AsyncMock(
+        side_effect=[
+            MozillionTwoFactorRequired("2FA"),
+            ("mozillion_session=abc; XSRF-TOKEN=xyz", "xyz"),
+        ]
+    )
 
     with patch(CLIENT, return_value=client):
         result = await _start_user_flow(hass)
-        first = {k: v for k, v in _login_input().items() if k != CONF_TOTP_SECRET}
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], first
+            result["flow_id"], _login_input()
         )
 
         assert result["step_id"] == "totp"
-        assert list(result["data_schema"].schema) == [CONF_TOTP_SECRET]
-        client.async_login.assert_not_called()
+        assert result["errors"] == {}
+        assert client.async_login.await_args.kwargs["totp_secret"] is None
 
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], {CONF_TOTP_SECRET: "JBSWY3DPEHPK3PXP"}
@@ -155,13 +168,26 @@ async def test_totp_secret_is_asked_for_after_email_and_password(
     assert client.async_login.await_args.kwargs["totp_secret"] == "JBSWY3DPEHPK3PXP"
 
 
-async def test_cookie_only_submission_skips_the_totp_step(
+async def test_account_without_two_factor_never_sees_the_totp_step(
     hass: HomeAssistant,
 ) -> None:
     client = _mock_client()
 
     with patch(CLIENT, return_value=client):
         result = await _start_user_flow(hass)
+        result = await _submit_login(hass, result, _login_input())
+
+    assert result["step_id"] == "select_sim"
+
+
+async def test_session_sign_in_skips_login_and_two_factor(
+    hass: HomeAssistant,
+) -> None:
+    client = _mock_client()
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass, "session")
+        assert result["step_id"] == "session"
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], _cookie_input()
         )
@@ -170,17 +196,34 @@ async def test_cookie_only_submission_skips_the_totp_step(
     client.async_login.assert_not_called()
 
 
-async def test_rejected_login_after_totp_returns_to_the_credentials_form(
+async def test_a_rejected_two_factor_secret_stays_on_the_totp_step(
     hass: HomeAssistant,
 ) -> None:
-    client = _mock_client(login_error=MozillionAuthError("bad code"))
+    client = _mock_client(login_error=MozillionTwoFactorRejected("bad code"))
 
     with patch(CLIENT, return_value=client):
         result = await _start_user_flow(hass)
-        result = await _submit_login(hass, result, _login_input())
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
 
-    assert result["step_id"] == "user"
-    assert result["errors"]["base"] == "invalid_auth"
+    assert result["step_id"] == "totp"
+    assert result["errors"]["base"] == "invalid_totp"
+
+
+async def test_an_unreadable_two_factor_secret_stays_on_the_totp_step(
+    hass: HomeAssistant,
+) -> None:
+    client = _mock_client(login_error=MozillionTotpSecretError("not base32"))
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+
+    assert result["step_id"] == "totp"
+    assert result["errors"]["base"] == "invalid_totp"
 
 
 async def test_login_success_offers_the_sim_list(hass: HomeAssistant) -> None:
@@ -264,7 +307,7 @@ async def test_failed_login_shows_invalid_auth(hass: HomeAssistant) -> None:
         result = await _submit_login(hass, result, _login_input())
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
-    assert result["step_id"] == "user"
+    assert result["step_id"] == "credentials"
     assert result["errors"]["base"] == "invalid_auth"
 
 
@@ -280,7 +323,7 @@ async def test_a_network_failure_still_shows_cannot_connect(
         result = await _submit_login(hass, result, _login_input())
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
-    assert result["step_id"] == "user"
+    assert result["step_id"] == "credentials"
     assert result["errors"]["base"] == "cannot_connect"
 
 
@@ -296,7 +339,7 @@ async def test_no_credentials_and_no_cookie_shows_missing_auth(
         )
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
-    assert result["step_id"] == "user"
+    assert result["step_id"] == "credentials"
     assert result["errors"]["base"] == "missing_auth"
 
 
@@ -374,7 +417,7 @@ async def test_manual_ids_creates_the_entry(hass: HomeAssistant) -> None:
     client = _mock_client(sims=[])
 
     with patch(CLIENT, return_value=client):
-        result = await _start_user_flow(hass)
+        result = await _start_user_flow(hass, "session")
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], _cookie_input()
         )
@@ -400,7 +443,7 @@ async def test_manual_ids_are_validated_against_the_api(
     client = _mock_client(sims=[], usage_error=RuntimeError("Unknown SIM"))
 
     with patch(CLIENT, return_value=client):
-        result = await _start_user_flow(hass)
+        result = await _start_user_flow(hass, "session")
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], _cookie_input()
         )
@@ -450,6 +493,74 @@ async def test_reauth_updates_the_stored_session(hass: HomeAssistant) -> None:
 
     assert result["type"] == data_entry_flow.FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
+
+
+async def test_reauth_reuses_the_stored_two_factor_secret(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**MOCK_ENTRY_DATA_COOKIE, CONF_TOTP_SECRET: "JBSWY3DPEHPK3PXP"},
+        unique_id="7654321",
+        version=2,
+    )
+    entry.add_to_hass(hass)
+    client = _mock_client()
+
+    with patch(CLIENT, return_value=client):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_REAUTH,
+                "entry_id": entry.entry_id,
+            },
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _credentials_only(_login_input())
+        )
+
+    assert result["reason"] == "reauth_successful"
+    assert client.async_login.await_args.kwargs["totp_secret"] == "JBSWY3DPEHPK3PXP"
+
+
+async def test_reauth_asks_for_a_new_secret_when_the_stored_one_is_rejected(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**MOCK_ENTRY_DATA_COOKIE, CONF_TOTP_SECRET: "OLDSECRET"},
+        unique_id="7654321",
+        version=2,
+    )
+    entry.add_to_hass(hass)
+    client = _mock_client()
+    client.async_login = AsyncMock(
+        side_effect=[
+            MozillionTwoFactorRejected("bad code"),
+            ("mozillion_session=abc; XSRF-TOKEN=xyz", "xyz"),
+        ]
+    )
+
+    with patch(CLIENT, return_value=client):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_REAUTH,
+                "entry_id": entry.entry_id,
+            },
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _credentials_only(_login_input())
+        )
+        assert result["step_id"] == "reauth_totp"
+        assert result["errors"]["base"] == "invalid_totp"
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_TOTP_SECRET: "NEWSECRET"}
+        )
+
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_TOTP_SECRET] == "NEWSECRET"
 
 
 async def test_reauth_shows_invalid_auth_for_rejected_credentials(

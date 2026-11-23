@@ -3,14 +3,36 @@
     "step": {
       "user": {
         "title": "Mozillion",
-        "description": "Connectez-vous à Mozillion pour récupérer votre consommation de données.",
+        "description": "Comment souhaitez-vous vous connecter ?",
+        "menu_options": {
+          "credentials": "Adresse e-mail et mot de passe",
+          "session": "Cookie de session du navigateur"
+        }
+      },
+      "credentials": {
+        "title": "Se connecter à Mozillion",
+        "description": "Mozillion ne demandera un secret à deux facteurs ensuite que si votre compte en a besoin.",
         "data": {
           "email": "Adresse e-mail",
           "password": "Mot de passe",
           "origin": "En-tête Origin (facultatif)",
-          "session_cookie": "En-tête Cookie (facultatif si vous utilisez la connexion)",
+          "scan_interval": "Intervalle d'interrogation (secondes)"
+        }
+      },
+      "session": {
+        "title": "Utiliser une session de navigateur",
+        "description": "Connectez-vous à Mozillion dans un navigateur, puis copiez l'en-tête Cookie et le jeton XSRF depuis ses outils de développement.",
+        "data": {
+          "session_cookie": "En-tête Cookie",
           "xsrf_token": "En-tête du jeton XSRF (facultatif)",
           "scan_interval": "Intervalle d'interrogation (secondes)"
+        }
+      },
+      "totp": {
+        "title": "Secret à deux facteurs",
+        "description": "Mozillion a demandé un code à deux facteurs. Collez le secret Base32 ou le lien otpauth:// affiché lors de la configuration de votre application d'authentification. L'intégration le conserve et génère elle-même les codes.",
+        "data": {
+          "totp_secret": "Secret TOTP ou lien otpauth://"
         }
       },
       "select_sim": {
@@ -36,7 +58,8 @@
           "email": "Adresse e-mail",
           "password": "Mot de passe",
           "session_cookie": "En-tête Cookie (facultatif si vous utilisez la connexion)",
-          "xsrf_token": "En-tête du jeton XSRF (facultatif)"
+          "xsrf_token": "En-tête du jeton XSRF (facultatif)",
+          "origin": "En-tête Origin (facultatif)"
         }
       },
       "reconfigure_confirm": {
@@ -46,35 +69,30 @@
           "email": "Adresse e-mail",
           "password": "Mot de passe",
           "session_cookie": "En-tête Cookie (facultatif si vous utilisez la connexion)",
-          "xsrf_token": "En-tête du jeton XSRF (facultatif)"
-        }
-      },
-      "totp": {
-        "title": "Code à deux facteurs",
-        "description": "Si votre compte Mozillion utilise une application d'authentification, collez son secret Base32 pour que l'intégration puisse se connecter. Laissez vide sinon.",
-        "data": {
-          "totp_secret": "Secret TOTP (Base32, facultatif)"
+          "xsrf_token": "En-tête du jeton XSRF (facultatif)",
+          "origin": "En-tête Origin (facultatif)"
         }
       },
       "reauth_totp": {
-        "title": "Code à deux facteurs",
-        "description": "Collez le secret TOTP Base32 de ce compte, ou laissez vide s'il n'en utilise pas.",
+        "title": "Secret à deux facteurs",
+        "description": "Le secret à deux facteurs enregistré est absent ou a été refusé. Collez le secret Base32 ou le lien otpauth:// de ce compte.",
         "data": {
-          "totp_secret": "Secret TOTP (Base32, facultatif)"
+          "totp_secret": "Secret TOTP ou lien otpauth://"
         }
       },
       "reconfigure_totp": {
-        "title": "Code à deux facteurs",
-        "description": "Collez le secret TOTP Base32 de ce compte, ou laissez vide s'il n'en utilise pas.",
+        "title": "Secret à deux facteurs",
+        "description": "Le secret à deux facteurs enregistré est absent ou a été refusé. Collez le secret Base32 ou le lien otpauth:// de ce compte.",
         "data": {
-          "totp_secret": "Secret TOTP (Base32, facultatif)"
+          "totp_secret": "Secret TOTP ou lien otpauth://"
         }
       }
     },
     "error": {
       "cannot_connect": "Connexion impossible. Vérifiez vos identifiants, l'en-tête Cookie et que la SIM est toujours associée à votre compte.",
-      "invalid_auth": "Mozillion a refusé ces identifiants. Vérifiez l'adresse e-mail, le mot de passe et le secret TOTP, puis réessayez.",
-      "missing_auth": "Fournissez soit une adresse e-mail et un mot de passe (et éventuellement le TOTP), soit un en-tête Cookie."
+      "invalid_auth": "Mozillion a refusé cette adresse e-mail ou ce mot de passe.",
+      "missing_auth": "Saisissez une adresse e-mail et un mot de passe, ou un en-tête Cookie.",
+      "invalid_totp": "Mozillion a refusé le secret à deux facteurs. Collez à nouveau le secret Base32 ou le lien otpauth://."
     },
     "abort": {
       "reauth_successful": "Réauthentification réussie.",

@@ -3,14 +3,36 @@
     "step": {
       "user": {
         "title": "Mozillion",
-        "description": "Cysylltwch â Mozillion i nôl eich defnydd data.",
+        "description": "Sut hoffech chi fewngofnodi?",
+        "menu_options": {
+          "credentials": "E-bost a chyfrinair",
+          "session": "Cwci sesiwn y porwr"
+        }
+      },
+      "credentials": {
+        "title": "Mewngofnodi i Mozillion",
+        "description": "Dim ond os oes ei angen ar eich cyfrif y bydd Mozillion yn gofyn nesaf am gyfrinach dau ffactor.",
         "data": {
           "email": "E-bost",
           "password": "Cyfrinair",
           "origin": "Pennawd Origin (dewisol)",
-          "session_cookie": "Pennawd Cookie (dewisol os ydych yn mewngofnodi)",
+          "scan_interval": "Cyfwng holi (eiliadau)"
+        }
+      },
+      "session": {
+        "title": "Defnyddio sesiwn porwr",
+        "description": "Mewngofnodwch i Mozillion mewn porwr, yna copïwch y pennawd Cookie a'r tocyn XSRF o'i offer datblygwr.",
+        "data": {
+          "session_cookie": "Pennawd Cookie",
           "xsrf_token": "Pennawd tocyn XSRF (dewisol)",
           "scan_interval": "Cyfwng holi (eiliadau)"
+        }
+      },
+      "totp": {
+        "title": "Cyfrinach dau ffactor",
+        "description": "Gofynnodd Mozillion am god dau ffactor. Gludwch y gyfrinach Base32 neu'r ddolen otpauth:// a ddangoswyd wrth sefydlu eich ap dilysu. Mae'r integreiddio yn ei chadw ac yn cynhyrchu'r codau ei hun.",
+        "data": {
+          "totp_secret": "Cyfrinach TOTP neu ddolen otpauth://"
         }
       },
       "select_sim": {
@@ -36,7 +58,8 @@
           "email": "E-bost",
           "password": "Cyfrinair",
           "session_cookie": "Pennawd Cookie (dewisol os ydych yn mewngofnodi)",
-          "xsrf_token": "Pennawd tocyn XSRF (dewisol)"
+          "xsrf_token": "Pennawd tocyn XSRF (dewisol)",
+          "origin": "Pennawd Origin (dewisol)"
         }
       },
       "reconfigure_confirm": {
@@ -46,35 +69,30 @@
           "email": "E-bost",
           "password": "Cyfrinair",
           "session_cookie": "Pennawd Cookie (dewisol os ydych yn mewngofnodi)",
-          "xsrf_token": "Pennawd tocyn XSRF (dewisol)"
-        }
-      },
-      "totp": {
-        "title": "Cod dau ffactor",
-        "description": "Os yw eich cyfrif Mozillion yn defnyddio ap dilysu, gludwch ei gyfrinach Base32 fel y gall yr integreiddio fewngofnodi. Gadewch yn wag os nad yw.",
-        "data": {
-          "totp_secret": "Cyfrinach TOTP (Base32, dewisol)"
+          "xsrf_token": "Pennawd tocyn XSRF (dewisol)",
+          "origin": "Pennawd Origin (dewisol)"
         }
       },
       "reauth_totp": {
-        "title": "Cod dau ffactor",
-        "description": "Gludwch gyfrinach TOTP Base32 y cyfrif hwn, neu gadewch yn wag os nad yw'n defnyddio un.",
+        "title": "Cyfrinach dau ffactor",
+        "description": "Mae'r gyfrinach dau ffactor a gadwyd ar goll neu wedi'i gwrthod. Gludwch y gyfrinach Base32 neu'r ddolen otpauth:// ar gyfer y cyfrif hwn.",
         "data": {
-          "totp_secret": "Cyfrinach TOTP (Base32, dewisol)"
+          "totp_secret": "Cyfrinach TOTP neu ddolen otpauth://"
         }
       },
       "reconfigure_totp": {
-        "title": "Cod dau ffactor",
-        "description": "Gludwch gyfrinach TOTP Base32 y cyfrif hwn, neu gadewch yn wag os nad yw'n defnyddio un.",
+        "title": "Cyfrinach dau ffactor",
+        "description": "Mae'r gyfrinach dau ffactor a gadwyd ar goll neu wedi'i gwrthod. Gludwch y gyfrinach Base32 neu'r ddolen otpauth:// ar gyfer y cyfrif hwn.",
         "data": {
-          "totp_secret": "Cyfrinach TOTP (Base32, dewisol)"
+          "totp_secret": "Cyfrinach TOTP neu ddolen otpauth://"
         }
       }
     },
     "error": {
       "cannot_connect": "Methu cysylltu. Gwiriwch eich dilysiadau, y pennawd Cookie, ac a yw'r SIM yn dal ar eich cyfrif.",
-      "invalid_auth": "Gwrthododd Mozillion y dilysiadau hynny. Gwiriwch yr e-bost, y cyfrinair a'r gyfrinach TOTP, yna rhowch gynnig arall arni.",
-      "missing_auth": "Rhowch naill ai e-bost a chyfrinair (a TOTP yn ddewisol) neu bennawd Cookie."
+      "invalid_auth": "Gwrthododd Mozillion yr e-bost neu'r cyfrinair hwnnw.",
+      "missing_auth": "Rhowch e-bost a chyfrinair, neu bennawd Cookie.",
+      "invalid_totp": "Gwrthododd Mozillion y gyfrinach dau ffactor. Gludwch y gyfrinach Base32 neu'r ddolen otpauth:// eto."
     },
     "abort": {
       "reauth_successful": "Ail-ddilysu'n llwyddiannus.",
