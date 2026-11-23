@@ -7,7 +7,6 @@
         "data": {
           "email": "Ríomhphost",
           "password": "Pasfhocal",
-          "totp_secret": "Rún TOTP (Base32, roghnach)",
           "origin": "Ceanntásc Origin (roghnach)",
           "session_cookie": "Ceanntásc Cookie (roghnach má úsáideann tú logáil isteach)",
           "xsrf_token": "Ceanntásc comhartha XSRF (roghnach)",
@@ -36,7 +35,6 @@
         "data": {
           "email": "Ríomhphost",
           "password": "Pasfhocal",
-          "totp_secret": "Rún TOTP (Base32, roghnach)",
           "session_cookie": "Ceanntásc Cookie (roghnach má úsáideann tú logáil isteach)",
           "xsrf_token": "Ceanntásc comhartha XSRF (roghnach)"
         }
@@ -47,9 +45,29 @@
         "data": {
           "email": "Ríomhphost",
           "password": "Pasfhocal",
-          "totp_secret": "Rún TOTP (Base32, roghnach)",
           "session_cookie": "Ceanntásc Cookie (roghnach má úsáideann tú logáil isteach)",
           "xsrf_token": "Ceanntásc comhartha XSRF (roghnach)"
+        }
+      },
+      "totp": {
+        "title": "Cód dhá fhachtóir",
+        "description": "Má úsáideann do chuntas Mozillion aip fíordheimhnithe, greamaigh a rún Base32 le go bhféadfaidh an comhtháthú logáil isteach. Fág folamh mura n-úsáideann.",
+        "data": {
+          "totp_secret": "Rún TOTP (Base32, roghnach)"
+        }
+      },
+      "reauth_totp": {
+        "title": "Cód dhá fhachtóir",
+        "description": "Greamaigh rún TOTP Base32 an chuntais seo, nó fág folamh mura n-úsáideann sé ceann.",
+        "data": {
+          "totp_secret": "Rún TOTP (Base32, roghnach)"
+        }
+      },
+      "reconfigure_totp": {
+        "title": "Cód dhá fhachtóir",
+        "description": "Greamaigh rún TOTP Base32 an chuntais seo, nó fág folamh mura n-úsáideann sé ceann.",
+        "data": {
+          "totp_secret": "Rún TOTP (Base32, roghnach)"
         }
       }
     },
