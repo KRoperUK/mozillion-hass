@@ -11,7 +11,9 @@ import pytest
 from aiohttp import ClientError, ClientSession, CookieJar
 from custom_components.mozillion.api import (
     MozillionAuthError,
+    MozillionChallengeError,
     MozillionClient,
+    MozillionSolverError,
     MozillionTwoFactorRejected,
     MozillionTwoFactorRequired,
     _build_cookie_header,
@@ -79,12 +81,13 @@ def _response(
     url: str = f"{BASE_URL}/",
     json_data: Any = None,
     content_type: str = "text/html",
+    headers: dict[str, str] | None = None,
 ) -> MagicMock:
     """Build a mock aiohttp response."""
     resp = MagicMock()
     resp.status = status
     resp.url = url
-    resp.headers = {"Content-Type": content_type}
+    resp.headers = {"Content-Type": content_type, **(headers or {})}
     resp.raise_for_status = MagicMock()
     resp.text = AsyncMock(return_value=text)
     if json_data is not None:
@@ -1013,3 +1016,114 @@ class TestMaskIdentifier:
     def test_empty_is_empty(self) -> None:
         assert mask_identifier("") == ""
         assert mask_identifier(None) == ""
+
+
+# ---------------------------------------------------------------------------
+# Cloudflare challenge and FlareSolverr
+# ---------------------------------------------------------------------------
+
+CHALLENGE = {"cf-mitigated": "challenge"}
+SOLVER_URL = "http://flaresolverr:8191/v1"
+
+
+def _challenged() -> MagicMock:
+    return _response(text="Just a moment...", status=403, headers=CHALLENGE)
+
+
+def _solved(cookies: list[str] | None = None, ua: str = "Solver/1.0") -> MagicMock:
+    names = ["cf_clearance"] if cookies is None else cookies
+    return _response(
+        json_data={
+            "status": "ok",
+            "solution": {
+                "userAgent": ua,
+                "cookies": [{"name": n, "value": f"{n}-value"} for n in names],
+            },
+        }
+    )
+
+
+class TestChallenge:
+    @pytest.mark.asyncio
+    async def test_a_challenge_is_not_an_auth_error(self) -> None:
+        """A 403 from Cloudflare must never send a healthy account to reauth."""
+        session = _session(get_responses=(_challenged(),))
+
+        with pytest.raises(MozillionChallengeError) as err:
+            await MozillionClient(session).async_login("user@example.com", "pass123")
+
+        assert not isinstance(err.value, MozillionAuthError)
+
+    @pytest.mark.asyncio
+    async def test_a_plain_403_is_still_a_rejected_session(self) -> None:
+        session = _session(get_responses=(_response(status=403),))
+
+        with pytest.raises(MozillionAuthError):
+            await MozillionClient(session).async_fetch_sims(cookie_header="a=b")
+
+    @pytest.mark.asyncio
+    async def test_a_challenge_on_a_dashboard_read_is_reported(self) -> None:
+        session = _session(get_responses=(_challenged(),))
+
+        with pytest.raises(MozillionChallengeError):
+            await MozillionClient(session).async_fetch_sims(cookie_header="a=b")
+
+    @pytest.mark.asyncio
+    async def test_flaresolverr_clears_the_challenge_and_login_retries(self) -> None:
+        session = _session(
+            get_responses=(_challenged(), _response(text=LOGIN_PAGE)),
+            post_responses=(
+                _solved(),
+                _response(text="<html>dashboard</html>", url=f"{BASE_URL}/home"),
+            ),
+            cookies={"mozillion_session": "abc", "XSRF-TOKEN": "xyz"},
+        )
+        client = MozillionClient(session, flaresolverr_url=SOLVER_URL)
+
+        cookie, _ = await client.async_login("user@example.com", "pass123")
+
+        solver_call = session.post.call_args_list[0]
+        assert solver_call.args[0] == SOLVER_URL
+        assert solver_call.kwargs["json"]["cmd"] == "request.get"
+        assert "cf_clearance=cf_clearance-value" in cookie
+        # Requests after the solve present the solver's browser, not ours.
+        assert session.get.call_args_list[1].kwargs["headers"]["User-Agent"] == (
+            "Solver/1.0"
+        )
+
+    @pytest.mark.asyncio
+    async def test_without_a_solver_the_challenge_propagates(self) -> None:
+        session = _session(get_responses=(_challenged(),))
+
+        with pytest.raises(MozillionChallengeError):
+            await MozillionClient(session).async_login("user@example.com", "pass123")
+
+        session.post.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_solver_that_fails_is_a_solver_error(self) -> None:
+        failed = _response(json_data={"status": "error", "message": "Timeout"})
+        session = _session(get_responses=(_challenged(),), post_responses=(failed,))
+        client = MozillionClient(session, flaresolverr_url=SOLVER_URL)
+
+        with pytest.raises(MozillionSolverError, match="Timeout"):
+            await client.async_login("user@example.com", "pass123")
+
+    @pytest.mark.asyncio
+    async def test_a_solution_without_clearance_is_rejected(self) -> None:
+        session = _session(
+            get_responses=(_challenged(),), post_responses=(_solved(cookies=[]),)
+        )
+        client = MozillionClient(session, flaresolverr_url=SOLVER_URL)
+
+        with pytest.raises(MozillionSolverError, match="cf_clearance"):
+            await client.async_login("user@example.com", "pass123")
+
+    @pytest.mark.asyncio
+    async def test_an_unreachable_solver_is_a_solver_error(self) -> None:
+        session = _session(get_responses=(_challenged(),))
+        session.post = MagicMock(side_effect=ClientError("refused"))
+        client = MozillionClient(session, flaresolverr_url=SOLVER_URL)
+
+        with pytest.raises(MozillionSolverError, match="Could not reach"):
+            await client.async_login("user@example.com", "pass123")

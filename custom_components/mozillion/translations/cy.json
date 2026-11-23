@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Mozillion",
-        "description": "Sut hoffech chi fewngofnodi?",
+        "description": "Sut hoffech chi fewngofnodi? Dewiswch sesiwn y porwr os yw Mozillion yn rhwystro mewngofnodi awtomatig.",
         "menu_options": {
           "credentials": "E-bost a chyfrinair",
           "session": "Cwci sesiwn y porwr"
@@ -16,7 +16,8 @@
           "email": "E-bost",
           "password": "Cyfrinair",
           "origin": "Pennawd Origin (dewisol)",
-          "scan_interval": "Cyfwng holi (eiliadau)"
+          "scan_interval": "Cyfwng holi (eiliadau)",
+          "flaresolverr_url": "Cyfeiriad FlareSolverr (e.e. http://flaresolverr:8191/v1)"
         }
       },
       "session": {
@@ -59,7 +60,8 @@
           "password": "Cyfrinair",
           "session_cookie": "Pennawd Cookie (dewisol os ydych yn mewngofnodi)",
           "xsrf_token": "Pennawd tocyn XSRF (dewisol)",
-          "origin": "Pennawd Origin (dewisol)"
+          "origin": "Pennawd Origin (dewisol)",
+          "flaresolverr_url": "Cyfeiriad FlareSolverr (e.e. http://flaresolverr:8191/v1)"
         }
       },
       "reconfigure_confirm": {
@@ -70,7 +72,8 @@
           "password": "Cyfrinair",
           "session_cookie": "Pennawd Cookie (dewisol os ydych yn mewngofnodi)",
           "xsrf_token": "Pennawd tocyn XSRF (dewisol)",
-          "origin": "Pennawd Origin (dewisol)"
+          "origin": "Pennawd Origin (dewisol)",
+          "flaresolverr_url": "Cyfeiriad FlareSolverr (e.e. http://flaresolverr:8191/v1)"
         }
       },
       "reauth_totp": {
@@ -92,7 +95,9 @@
       "cannot_connect": "Methu cysylltu. Gwiriwch eich dilysiadau, y pennawd Cookie, ac a yw'r SIM yn dal ar eich cyfrif.",
       "invalid_auth": "Gwrthododd Mozillion yr e-bost neu'r cyfrinair hwnnw.",
       "missing_auth": "Rhowch e-bost a chyfrinair, neu bennawd Cookie.",
-      "invalid_totp": "Gwrthododd Mozillion y gyfrinach dau ffactor. Gludwch y gyfrinach Base32 neu'r ddolen otpauth:// eto."
+      "invalid_totp": "Gwrthododd Mozillion y gyfrinach dau ffactor. Gludwch y gyfrinach Base32 neu'r ddolen otpauth:// eto.",
+      "cloudflare_blocked": "Mae Cloudflare yn rhwystro mewngofnodi o'r rhwydwaith hwn. Rhowch gyfeiriad eich FlareSolverr isod, neu dechreuwch eto a defnyddio opsiwn sesiwn y porwr.",
+      "solver_failed": "Ni allai FlareSolverr glirio her Cloudflare. Gwiriwch y cyfeiriad, a'i fod yn rhedeg ar yr un rhwydwaith â Home Assistant."
     },
     "abort": {
       "reauth_successful": "Ail-ddilysu'n llwyddiannus.",
@@ -195,6 +200,30 @@
     "dashboard_unreadable": {
       "title": "Methu darllen bwrdd dangos Mozillion",
       "description": "Ni lwyddwyd i ddarllen bwrdd dangos {entry} am {attempts} cylch yn olynol, felly nid yw'r pecyn, statws y gwasanaeth na'r dyddiad ailosod ar gael.\n\nGwall diwethaf: {error}\n\nFel arfer mae hyn yn golygu bod Mozillion wedi newid ei dudalen, er bod problem mewngofnodi neu rwydwaith yn edrych yr un fath. Nid yw'r defnydd data ei hun yn cael ei effeithio."
+    },
+    "cloudflare_blocked": {
+      "title": "Mae Cloudflare yn rhwystro Mozillion",
+      "fix_flow": {
+        "step": {
+          "solver": {
+            "title": "Clirio her Cloudflare",
+            "description": "Mae Cloudflare yn rhwystro {entry}, felly ni ellir darllen y defnydd data.\n\nGwall diwethaf: {error}\n\nRhowch gyfeiriad FlareSolverr sy'n rhedeg ar yr un rhwydwaith â Home Assistant, er enghraifft http://flaresolverr:8191/v1. Caiff ei brofi cyn ei gadw.",
+            "data": {
+              "flaresolverr_url": "Cyfeiriad FlareSolverr"
+            }
+          }
+        },
+        "error": {
+          "solver_failed": "Ni allai FlareSolverr glirio her Cloudflare. Gwiriwch y cyfeiriad, a'i fod yn rhedeg ar yr un rhwydwaith â Home Assistant."
+        },
+        "abort": {
+          "entry_missing": "Nid yw'r cyfrif Mozillion hwn yn bodoli mwyach."
+        }
+      }
+    },
+    "cloudflare_blocked_cookie": {
+      "title": "Mae Cloudflare yn rhwystro Mozillion",
+      "description": "Mae Cloudflare yn rhwystro {entry}, felly ni ellir darllen y defnydd data.\n\nGwall diwethaf: {error}\n\nMae'r cyfrif hwn yn mewngofnodi gyda sesiwn porwr, na all glirio'r her ei hun. Agorwch yr integreiddio, dewiswch Ail-ffurfweddu, a gludwch bennawd Cookie newydd o borwr sy'n gallu cyrraedd Mozillion. I osgoi hyn yn y dyfodol, ail-ffurfweddwch gyda'ch e-bost a'ch cyfrinair a sefydlwch FlareSolverr."
     }
   }
 }

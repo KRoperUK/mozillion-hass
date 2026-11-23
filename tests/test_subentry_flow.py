@@ -195,7 +195,7 @@ async def test_one_session_is_created_for_the_whole_add_sim_flow(
     session = MagicMock(name="flow session")
     clients: list[MagicMock] = []
 
-    def _build_client(http_session: Any) -> MagicMock:
+    def _build_client(http_session: Any, **_: Any) -> MagicMock:
         assert http_session is session, "the client must sit on the flow's session"
         client = _client([MOCK_SIM, SECOND_SIM])
         clients.append(client)

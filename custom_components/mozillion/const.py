@@ -27,12 +27,16 @@ CONF_EMAIL = "email"
 CONF_PASSWORD = "password"
 CONF_TOTP_SECRET = "totp_secret"
 CONF_ORIGIN = "origin"
+CONF_FLARESOLVERR_URL = "flaresolverr_url"
 
 # Mozillion regenerates usage server-side and answers "pending" until the
 # numbers are ready, so each poll mirrors the dashboard's own polling loop
 # (five attempts, three seconds apart).
 USAGE_POLL_ATTEMPTS = 5
 USAGE_POLL_DELAY = 3.0
+
+# Seconds FlareSolverr may spend clearing a challenge before we give up.
+SOLVER_TIMEOUT = 60
 
 DEFAULT_SCAN_INTERVAL = 3600
 DEFAULT_ORIGIN = BASE_URL
@@ -52,6 +56,9 @@ DASHBOARD_REFRESH_INTERVAL = 21600  # 6 hours, in seconds
 # single blip does not nag the user.
 REPAIR_FAILURE_THRESHOLD = 3
 ISSUE_DASHBOARD_UNREADABLE = "dashboard_unreadable"
+# One per account (the entry id is appended), because the fix is a setting on
+# the entry: where FlareSolverr lives.
+ISSUE_CLOUDFLARE_BLOCKED = "cloudflare_blocked"
 
 ATTR_RAW = "raw"
 ATTR_USAGE = "usage"

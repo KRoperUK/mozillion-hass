@@ -20,7 +20,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 import pyotp
-from aiohttp import ClientError, ClientResponse, ClientSession
+from aiohttp import ClientError, ClientResponse, ClientSession, ClientTimeout
 from yarl import URL
 
 from .const import (
@@ -32,6 +32,7 @@ from .const import (
     DEFAULT_ORIGIN,
     LOGIN_PATH,
     LOGIN_POST_PATH,
+    SOLVER_TIMEOUT,
     TWO_FACTOR_PATH,
     USAGE_POLL_ATTEMPTS,
     USAGE_POLL_DELAY,
@@ -46,6 +47,19 @@ _USAGE_DONE_STATUSES = ("success", "completed")
 
 class MozillionAuthError(RuntimeError):
     """Raised when the session is no longer authenticated (cookie/token expired)."""
+
+
+class MozillionChallengeError(RuntimeError):
+    """Cloudflare answered with a bot challenge instead of the Mozillion page.
+
+    Not an authentication failure: the session may be perfectly good, so it must
+    never send the user through reauth. A solver (FlareSolverr) or a session
+    copied from a browser that already passed the challenge gets past it.
+    """
+
+
+class MozillionSolverError(MozillionChallengeError):
+    """FlareSolverr was configured but could not clear the challenge."""
 
 
 class MozillionTwoFactorRequired(RuntimeError):
@@ -116,8 +130,21 @@ class MozillionSim:
 class MozillionClient:
     """Thin wrapper around the Mozillion website endpoints."""
 
-    def __init__(self, session: ClientSession) -> None:
+    def __init__(
+        self, session: ClientSession, *, flaresolverr_url: str | None = None
+    ) -> None:
         self._session = session
+        # Public so a config flow can set it after the user supplies one.
+        self.flaresolverr_url = flaresolverr_url
+        # Cloudflare ties its clearance cookie to the User-Agent that earned it,
+        # so after a solve every request must present the solver's browser UA.
+        self._user_agent = USER_AGENT
+
+    @property
+    def has_solver(self) -> bool:
+        """Return True when a FlareSolverr endpoint is configured."""
+
+        return bool(self.flaresolverr_url)
 
     # ------------------------------------------------------------------
     # Authentication
@@ -134,6 +161,24 @@ class MozillionClient:
 
         Returns ``(cookie_header, xsrf_header)``.
         """
+
+        try:
+            return await self._async_login_once(email, password, totp_secret, origin)
+        except MozillionChallengeError:
+            if not self.flaresolverr_url:
+                raise
+            _LOGGER.debug("Cloudflare challenge on login; asking FlareSolverr")
+            await self.async_solve_challenge(origin)
+            return await self._async_login_once(email, password, totp_secret, origin)
+
+    async def _async_login_once(
+        self,
+        email: str,
+        password: str,
+        totp_secret: str | None,
+        origin: str,
+    ) -> tuple[str, str | None]:
+        """One login attempt, with no challenge handling."""
 
         # Deliberately no email: debug logs get pasted into public bug reports,
         # and the account is already known from the entry.
@@ -176,14 +221,65 @@ class MozillionClient:
         )
         return cookie_header, xsrf
 
+    async def async_solve_challenge(self, origin: str) -> None:
+        """Clear Cloudflare's challenge through FlareSolverr.
+
+        FlareSolverr drives a real browser to the login page. Its cookies
+        (notably ``cf_clearance``) go into this client's jar and its User-Agent
+        becomes ours, which is what lets plain HTTP requests through afterwards.
+        The clearance is bound to the IP it was earned from, so FlareSolverr has
+        to egress through the same address as Home Assistant.
+        """
+
+        endpoint = str(self.flaresolverr_url)
+        try:
+            async with self._session.post(
+                endpoint,
+                json={
+                    "cmd": "request.get",
+                    "url": f"{BASE_URL}{LOGIN_PATH}",
+                    "maxTimeout": SOLVER_TIMEOUT * 1000,
+                },
+                timeout=ClientTimeout(total=SOLVER_TIMEOUT + 30),
+            ) as resp:
+                payload = await resp.json(content_type=None)
+        except (ClientError, TimeoutError, ValueError) as err:
+            raise MozillionSolverError(
+                f"Could not reach FlareSolverr at {endpoint}: {err}"
+            ) from err
+
+        solution = payload.get("solution") if isinstance(payload, dict) else None
+        if (
+            not isinstance(payload, dict)
+            or payload.get("status") != "ok"
+            or not isinstance(solution, dict)
+        ):
+            message = payload.get("message") if isinstance(payload, dict) else payload
+            raise MozillionSolverError(
+                f"FlareSolverr could not clear Cloudflare's challenge: {message}"
+            )
+
+        cookies = solution.get("cookies") or []
+        if not any(c.get("name") == "cf_clearance" for c in cookies):
+            raise MozillionSolverError(
+                "FlareSolverr finished without a cf_clearance cookie"
+            )
+        for cookie in cookies:
+            self._session.cookie_jar.update_cookies(
+                {cookie["name"]: cookie["value"]}, URL(origin)
+            )
+        if solution.get("userAgent"):
+            self._user_agent = str(solution["userAgent"])
+
     async def _async_fetch_login_token(self, origin: str) -> str:
         """Fetch the login page and return its CSRF token."""
 
         url = f"{BASE_URL}{LOGIN_PATH}"
         try:
             async with self._session.get(
-                url, headers={"Origin": origin, "User-Agent": USER_AGENT}
+                url, headers={"Origin": origin, "User-Agent": self._user_agent}
             ) as resp:
+                _raise_for_challenge(resp)
                 resp.raise_for_status()
                 html = await resp.text()
         except ClientError as err:
@@ -230,9 +326,10 @@ class MozillionClient:
                     "Content-Type": "application/x-www-form-urlencoded",
                     "Origin": origin,
                     "Referer": referer,
-                    "User-Agent": USER_AGENT,
+                    "User-Agent": self._user_agent,
                 },
             ) as resp:
+                _raise_for_challenge(resp)
                 resp.raise_for_status()
                 return str(resp.url), await resp.text()
         except ClientError as err:
@@ -389,7 +486,7 @@ class MozillionClient:
             "Sec-Fetch-Dest": "document",
             "Sec-Fetch-Mode": "navigate",
             "Sec-Fetch-Site": "same-origin",
-            "User-Agent": USER_AGENT,
+            "User-Agent": self._user_agent,
             "Cookie": cookie_header,
         }
         if xsrf_token:
@@ -408,7 +505,7 @@ class MozillionClient:
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-origin",
-            "User-Agent": USER_AGENT,
+            "User-Agent": self._user_agent,
             "X-Requested-With": "XMLHttpRequest",
             "Cookie": cookie_header,
         }
@@ -421,6 +518,7 @@ class MozillionClient:
 
         try:
             async with self._session.get(url, headers=headers) as resp:
+                _raise_for_challenge(resp)
                 _raise_for_rate_limit(resp)
                 body = await resp.text()
                 # An expired session answers with the login page (200, HTML),
@@ -441,6 +539,7 @@ class MozillionClient:
 
         try:
             async with self._session.get(url, headers=headers, params=params) as resp:
+                _raise_for_challenge(resp)
                 _raise_for_rate_limit(resp)
                 _raise_if_auth_bounce(resp, await resp.text(), expect_json=True)
                 resp.raise_for_status()
@@ -692,6 +791,26 @@ def _raise_for_usage_error(payload: dict[str, Any]) -> None:
         raise RuntimeError(
             payload.get("message") or "Mozillion failed to refresh the usage data"
         )
+
+
+def _raise_for_challenge(resp: ClientResponse) -> None:
+    """Turn a Cloudflare bot challenge into an error that says what it is.
+
+    Cloudflare answers 403 (or 503) with ``cf-mitigated: challenge``. Left alone,
+    the 403 reads as a rejected session in ``_raise_if_auth_bounce`` and sends a
+    healthy account through reauth, which can never help. Checked before every
+    other classification for that reason.
+    """
+
+    if resp.status not in (403, 503):
+        return
+    if str(resp.headers.get("cf-mitigated", "")).lower() != "challenge":
+        return
+    raise MozillionChallengeError(
+        "Cloudflare is challenging requests from this network (HTTP "
+        f"{resp.status}). Set up FlareSolverr in the integration, or sign in "
+        "with a session copied from a browser."
+    )
 
 
 def _raise_for_rate_limit(resp: ClientResponse) -> None:

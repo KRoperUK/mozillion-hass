@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Mozillion",
-        "description": "Comment souhaitez-vous vous connecter ?",
+        "description": "Comment souhaitez-vous vous connecter ? Choisissez la session de navigateur si Mozillion bloque la connexion automatique.",
         "menu_options": {
           "credentials": "Adresse e-mail et mot de passe",
           "session": "Cookie de session du navigateur"
@@ -16,7 +16,8 @@
           "email": "Adresse e-mail",
           "password": "Mot de passe",
           "origin": "En-tête Origin (facultatif)",
-          "scan_interval": "Intervalle d'interrogation (secondes)"
+          "scan_interval": "Intervalle d'interrogation (secondes)",
+          "flaresolverr_url": "Adresse de FlareSolverr (p. ex. http://flaresolverr:8191/v1)"
         }
       },
       "session": {
@@ -59,7 +60,8 @@
           "password": "Mot de passe",
           "session_cookie": "En-tête Cookie (facultatif si vous utilisez la connexion)",
           "xsrf_token": "En-tête du jeton XSRF (facultatif)",
-          "origin": "En-tête Origin (facultatif)"
+          "origin": "En-tête Origin (facultatif)",
+          "flaresolverr_url": "Adresse de FlareSolverr (p. ex. http://flaresolverr:8191/v1)"
         }
       },
       "reconfigure_confirm": {
@@ -70,7 +72,8 @@
           "password": "Mot de passe",
           "session_cookie": "En-tête Cookie (facultatif si vous utilisez la connexion)",
           "xsrf_token": "En-tête du jeton XSRF (facultatif)",
-          "origin": "En-tête Origin (facultatif)"
+          "origin": "En-tête Origin (facultatif)",
+          "flaresolverr_url": "Adresse de FlareSolverr (p. ex. http://flaresolverr:8191/v1)"
         }
       },
       "reauth_totp": {
@@ -92,7 +95,9 @@
       "cannot_connect": "Connexion impossible. Vérifiez vos identifiants, l'en-tête Cookie et que la SIM est toujours associée à votre compte.",
       "invalid_auth": "Mozillion a refusé cette adresse e-mail ou ce mot de passe.",
       "missing_auth": "Saisissez une adresse e-mail et un mot de passe, ou un en-tête Cookie.",
-      "invalid_totp": "Mozillion a refusé le secret à deux facteurs. Collez à nouveau le secret Base32 ou le lien otpauth://."
+      "invalid_totp": "Mozillion a refusé le secret à deux facteurs. Collez à nouveau le secret Base32 ou le lien otpauth://.",
+      "cloudflare_blocked": "Cloudflare bloque la connexion depuis ce réseau. Saisissez ci-dessous l'adresse de FlareSolverr, ou recommencez avec l'option de session de navigateur.",
+      "solver_failed": "FlareSolverr n'a pas pu franchir le défi de Cloudflare. Vérifiez l'adresse, et qu'il tourne sur le même réseau que Home Assistant."
     },
     "abort": {
       "reauth_successful": "Réauthentification réussie.",
@@ -195,6 +200,30 @@
     "dashboard_unreadable": {
       "title": "Impossible de lire le tableau de bord Mozillion",
       "description": "Le tableau de bord de {entry} n'a pas pu être lu pendant {attempts} cycles consécutifs ; les données de forfait, d'état du service et de date de réinitialisation sont donc indisponibles.\n\nDernière erreur : {error}\n\nCela signifie généralement que Mozillion a modifié sa page, mais un problème de connexion ou de réseau produit le même effet. La consommation de données n'est pas affectée."
+    },
+    "cloudflare_blocked": {
+      "title": "Cloudflare bloque Mozillion",
+      "fix_flow": {
+        "step": {
+          "solver": {
+            "title": "Franchir le défi de Cloudflare",
+            "description": "Cloudflare bloque {entry}, la consommation de données ne peut donc pas être lue.\n\nDernière erreur : {error}\n\nSaisissez l'adresse d'un FlareSolverr exécuté sur le même réseau que Home Assistant, par exemple http://flaresolverr:8191/v1. Elle est testée avant d'être enregistrée.",
+            "data": {
+              "flaresolverr_url": "Adresse de FlareSolverr"
+            }
+          }
+        },
+        "error": {
+          "solver_failed": "FlareSolverr n'a pas pu franchir le défi de Cloudflare. Vérifiez l'adresse, et qu'il tourne sur le même réseau que Home Assistant."
+        },
+        "abort": {
+          "entry_missing": "Ce compte Mozillion n'existe plus."
+        }
+      }
+    },
+    "cloudflare_blocked_cookie": {
+      "title": "Cloudflare bloque Mozillion",
+      "description": "Cloudflare bloque {entry}, la consommation de données ne peut donc pas être lue.\n\nDernière erreur : {error}\n\nCe compte se connecte avec une session de navigateur, qui ne peut pas franchir seule le défi. Ouvrez l'intégration, choisissez Reconfigurer et collez un en-tête Cookie récent depuis un navigateur qui accède à Mozillion. Pour éviter cela à l'avenir, reconfigurez avec votre adresse e-mail et votre mot de passe, et installez FlareSolverr."
     }
   }
 }

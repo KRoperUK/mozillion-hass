@@ -174,8 +174,10 @@ rules:
     status: done
     comment: >-
       A dashboard read that keeps failing raises a repair, because the fix is
-      outside Home Assistant (Mozillion changing their page markup). Rejected
-      credentials are handled by the reauth flow instead.
+      outside Home Assistant (Mozillion changing their page markup). A Cloudflare
+      challenge that blocks polling raises a second one, with a fix flow that
+      takes and tests a FlareSolverr address. Rejected credentials are handled by
+      the reauth flow instead.
   stale-devices:
     status: exempt
     comment: >-

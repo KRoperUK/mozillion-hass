@@ -40,6 +40,9 @@ class MozillionSession:
     # proactively refresh an expiring session. None (unknown) forces a refresh when
     # credentials are present.
     authenticated_at: float | None = None
+    # Whether a Cloudflare repair is outstanding for the account. Shared, so
+    # whichever SIM polls successfully first can withdraw it.
+    challenge_issue_active: bool = False
     # Only one login may be in flight, however many SIMs poll at once.
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
