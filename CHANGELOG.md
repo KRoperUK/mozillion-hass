@@ -5,6 +5,33 @@
 
 * **coordinator:** transparently re-authenticate on expired sessions ([a3eafa2](https://github.com/KRoperUK/mozillion-hass/commit/a3eafa25900f4f5f93a5cfa9bd8b022e419f3798))
 
+## [1.1.0](https://github.com/KRoperUK/mozillion-hass/compare/v1.0.1...v1.1.0) (2026-11-23)
+
+
+### Features
+
+* **config-flow:** ask for the TOTP secret on its own step ([34558e1](https://github.com/KRoperUK/mozillion-hass/commit/34558e11c1a0928e9335c5492fbee5acf69f0226))
+* **config-flow:** ask for the TOTP secret on its own step ([736e9cc](https://github.com/KRoperUK/mozillion-hass/commit/736e9cc2e9b4f60c2e1f494506ae1ce186595813))
+* **config-flow:** choose sign-in method and ask for 2FA only when required ([d179308](https://github.com/KRoperUK/mozillion-hass/commit/d1793087f96b394f20eac599b99ded34a920f799))
+* **config-flow:** choose sign-in method and ask for 2FA only when required ([3686beb](https://github.com/KRoperUK/mozillion-hass/commit/3686beba34e24fb3a9504ff7adc0fd2bb408d1f0))
+* **config-flow:** suggest a FlareSolverr address when Cloudflare blocks ([e6bf1cd](https://github.com/KRoperUK/mozillion-hass/commit/e6bf1cde049e910c6e2b6769cc4a33cbb4e02291))
+* **config-flow:** suggest a FlareSolverr address when Cloudflare blocks ([3c62ff3](https://github.com/KRoperUK/mozillion-hass/commit/3c62ff3e194eb49e8824ca44b4b8119bdf13ed8a))
+* detect Cloudflare challenges and clear them with FlareSolverr ([04efa16](https://github.com/KRoperUK/mozillion-hass/commit/04efa165dc2d8f61753393142725238a861fd28b))
+* detect Cloudflare challenges and clear them with FlareSolverr ([3c9a247](https://github.com/KRoperUK/mozillion-hass/commit/3c9a24700cf838196b7f6f95ef8cb7a15cbb22b3))
+* **diagnostics:** report auth method and solver use, redact the solver address ([4f77479](https://github.com/KRoperUK/mozillion-hass/commit/4f7747989d4b2d66020bc4e0f46cdac1a9ec19a3))
+* **diagnostics:** report auth method and solver use, redact the solver address ([351b7ee](https://github.com/KRoperUK/mozillion-hass/commit/351b7ee12c218ea05ceebf50395208f1b7488276))
+* **options:** change the 2FA secret and FlareSolverr address without reconfiguring ([6ee38ed](https://github.com/KRoperUK/mozillion-hass/commit/6ee38ed191332ae3d512dd29dc82988cebcce919))
+* **options:** change the 2FA secret and FlareSolverr address without reconfiguring ([2b0b1ef](https://github.com/KRoperUK/mozillion-hass/commit/2b0b1ef2ccbb1c24069af36c96ed1accfb99148a))
+* raise a fixable repair when Cloudflare blocks polling ([1e83cad](https://github.com/KRoperUK/mozillion-hass/commit/1e83cad41a4fd0718ad13b26f3074aa847db8633))
+* renew the Cloudflare clearance before it expires ([91d7af8](https://github.com/KRoperUK/mozillion-hass/commit/91d7af81b4d7acbcfb625b47a72ceb798d14674e))
+* renew the Cloudflare clearance before it expires ([04ad68b](https://github.com/KRoperUK/mozillion-hass/commit/04ad68b4d7f763d2788810c7f705cd0d29b76ae0))
+
+
+### Bug Fixes
+
+* quote a backticked comment in quality_scale.yaml ([dd6a597](https://github.com/KRoperUK/mozillion-hass/commit/dd6a597bc8a2145c7c2b2bd22b3a48a3b9795fd8))
+* quote a backticked comment in quality_scale.yaml ([be1e64b](https://github.com/KRoperUK/mozillion-hass/commit/be1e64b9251ae157f3788a726d359e70bb171d2e))
+
 ## [1.0.1](https://github.com/KRoperUK/mozillion-hass/compare/v1.0.0...v1.0.1) (2026-10-26)
 
 
