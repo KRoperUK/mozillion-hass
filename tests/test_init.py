@@ -20,6 +20,7 @@ from custom_components.mozillion.const import (
     ATTR_PORT_STATUS,
     ATTR_SIM_STATUS,
     ATTR_USAGE,
+    CONF_FLARESOLVERR_URL,
     CONF_ICCID,
     CONF_ORDER_DETAIL_ID,
     CONF_SESSION_COOKIE,
@@ -517,3 +518,15 @@ async def test_one_read_serves_every_sim_on_the_account(
         for coordinator in coordinators:
             await coordinator.async_refresh()
         assert client.async_fetch_sims.await_count == 2
+
+
+async def test_the_solver_address_is_part_of_the_options_fingerprint() -> None:
+    """The client is built with it at setup, so changing it must reload."""
+    from custom_components.mozillion import _options_fingerprint
+
+    base = _make_config_entry(data=MOCK_ENTRY_DATA_COOKIE)
+    changed = _make_config_entry(
+        data={**MOCK_ENTRY_DATA_COOKIE, CONF_FLARESOLVERR_URL: "http://fs:8191/v1"}
+    )
+
+    assert _options_fingerprint(base) != _options_fingerprint(changed)

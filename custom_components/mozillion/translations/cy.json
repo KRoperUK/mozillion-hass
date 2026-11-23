@@ -152,9 +152,21 @@
       "init": {
         "title": "Opsiynau Mozillion",
         "data": {
-          "scan_interval": "Cyfwng holi (eiliadau)"
-        }
+          "scan_interval": "Cyfwng holi (eiliadau)",
+          "totp_secret": "Cyfrinach TOTP neu ddolen otpauth://",
+          "flaresolverr_url": "Cyfeiriad FlareSolverr (e.e. http://flaresolverr:8191/v1)"
+        },
+        "description": "Ar gyfer cyfrif sy'n mewngofnodi gyda chyfrinair, caiff cyfrinach dau ffactor neu gyfeiriad FlareSolverr newydd ei brofi gyda mewngofnodi go iawn cyn ei gadw. Gwagiwch faes i'w dynnu."
       }
+    },
+    "error": {
+      "invalid_auth": "Gwrthododd Mozillion yr e-bost neu'r cyfrinair a gadwyd. Defnyddiwch Ail-ffurfweddu i'w newid.",
+      "invalid_totp": "Gwrthododd Mozillion y gyfrinach dau ffactor. Gludwch y gyfrinach Base32 neu'r ddolen otpauth:// eto.",
+      "missing_auth": "Nid oes gan y cyfrif hwn e-bost a chyfrinair wedi'u cadw i'w profi.",
+      "cloudflare_blocked": "Mae Cloudflare yn rhwystro mewngofnodi o'r rhwydwaith hwn. Ychwanegwch gyfeiriad FlareSolverr, neu gwiriwch yr un a roddwyd.",
+      "solver_failed": "Ni allai FlareSolverr glirio her Cloudflare. Gwiriwch y cyfeiriad, a'i fod yn rhedeg ar yr un rhwydwaith â Home Assistant.",
+      "cannot_connect": "Methu cysylltu â Mozillion. Gwiriwch y rhwydwaith a rhowch gynnig arall arni.",
+      "two_factor_required": "Gofynnodd Mozillion am god dau ffactor. Rhowch y gyfrinach TOTP neu'r ddolen otpauth://."
     }
   },
   "entity": {

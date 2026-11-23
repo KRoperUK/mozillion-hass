@@ -152,9 +152,21 @@
       "init": {
         "title": "Roghanna Mozillion",
         "data": {
-          "scan_interval": "Eatramh iarratais (soicindí)"
-        }
+          "scan_interval": "Eatramh iarratais (soicindí)",
+          "totp_secret": "Rún TOTP nó nasc otpauth://",
+          "flaresolverr_url": "Seoladh FlareSolverr (m.sh. http://flaresolverr:8191/v1)"
+        },
+        "description": "I gcás cuntais a logálann isteach le pasfhocal, déantar rún dhá fhachtóir nó seoladh FlareSolverr athraithe a thástáil le fíorlogáil isteach sula sábháiltear é. Glan réimse chun é a bhaint."
       }
+    },
+    "error": {
+      "invalid_auth": "Dhiúltaigh Mozillion don ríomhphost nó don phasfhocal stóráilte. Úsáid Athchumraigh chun iad a athrú.",
+      "invalid_totp": "Dhiúltaigh Mozillion don rún dhá fhachtóir. Greamaigh an rún Base32 nó an nasc otpauth:// arís.",
+      "missing_auth": "Níl ríomhphost ná pasfhocal stóráilte ag an gcuntas seo le tástáil.",
+      "cloudflare_blocked": "Tá Cloudflare ag blocáil logáil isteach ón líonra seo. Cuir seoladh FlareSolverr leis, nó seiceáil an ceann a cuireadh isteach.",
+      "solver_failed": "Níor éirigh le FlareSolverr dúshlán Cloudflare a ghlanadh. Seiceáil an seoladh, agus go bhfuil sé ar an líonra céanna le Home Assistant.",
+      "cannot_connect": "Ní féidir ceangal le Mozillion. Seiceáil an líonra agus bain triail eile as.",
+      "two_factor_required": "D'iarr Mozillion cód dhá fhachtóir. Cuir isteach an rún TOTP nó an nasc otpauth://."
     }
   },
   "entity": {

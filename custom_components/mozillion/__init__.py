@@ -167,9 +167,16 @@ def _subentry_fingerprint(entry: ConfigEntry) -> SubentryFingerprint:
 
 
 def _options_fingerprint(entry: ConfigEntry) -> OptionsFingerprint:
-    """Summarise the entry options the loaded entry was built from."""
+    """Summarise the entry options the loaded entry was built from.
 
-    return tuple(sorted(entry.options.items()))
+    The FlareSolverr address is entry data, but it is baked into the client at
+    setup, so a change to it has to reload just like an option does.
+    """
+
+    return (
+        *sorted(entry.options.items()),
+        (CONF_FLARESOLVERR_URL, entry.data.get(CONF_FLARESOLVERR_URL) or ""),
+    )
 
 
 async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:

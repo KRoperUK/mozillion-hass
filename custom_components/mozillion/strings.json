@@ -152,9 +152,21 @@
       "init": {
         "title": "Mozillion options",
         "data": {
-          "scan_interval": "Scan interval (seconds)"
-        }
+          "scan_interval": "Scan interval (seconds)",
+          "totp_secret": "TOTP secret or otpauth:// link",
+          "flaresolverr_url": "FlareSolverr address (e.g. http://flaresolverr:8191/v1)"
+        },
+        "description": "For an account that signs in with a password, a changed 2FA secret or FlareSolverr address is tested with a real sign-in before it is saved. Clear a field to remove it."
       }
+    },
+    "error": {
+      "invalid_auth": "Mozillion rejected the stored email or password. Use Reconfigure to change them.",
+      "invalid_totp": "Mozillion rejected the two-factor secret. Paste the Base32 secret or otpauth:// link again.",
+      "missing_auth": "This account has no stored email and password to test with.",
+      "cloudflare_blocked": "Cloudflare is blocking sign-in from this network. Add a FlareSolverr address, or check the one entered.",
+      "solver_failed": "FlareSolverr could not clear Cloudflare's challenge. Check the address, and that it runs on the same network as Home Assistant.",
+      "cannot_connect": "Cannot connect to Mozillion. Check the network and try again.",
+      "two_factor_required": "Mozillion asked for a two-factor code. Enter the TOTP secret or otpauth:// link."
     }
   },
   "entity": {
