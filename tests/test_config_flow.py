@@ -6,6 +6,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from aiohttp import ClientError
 from custom_components.mozillion.api import (
     MozillionAuthError,
     MozillionChallengeError,
@@ -13,6 +14,9 @@ from custom_components.mozillion.api import (
     MozillionTotpSecretError,
     MozillionTwoFactorRejected,
     MozillionTwoFactorRequired,
+)
+from custom_components.mozillion.config_flow import (
+    _async_discover_solver as real_discover,
 )
 from custom_components.mozillion.const import (
     CONF_EMAIL,
@@ -53,6 +57,17 @@ def _bypass_setup():
 
     with patch("custom_components.mozillion.async_setup_entry", return_value=True):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _no_solver_discovery():
+    """Keep the flow tests off the network; discovery has its own tests."""
+
+    with patch(
+        "custom_components.mozillion.config_flow._async_discover_solver",
+        new=AsyncMock(return_value=""),
+    ) as discover:
+        yield discover
 
 
 def _login_input(**overrides: Any) -> dict[str, Any]:
@@ -929,3 +944,114 @@ async def test_subentry_types_hook_is_callable_on_the_handler_class(
 
     assert SUBENTRY_TYPE_SIM in supported
     assert supported[SUBENTRY_TYPE_SIM] is not None
+
+
+# ---------------------------------------------------------------------------
+# FlareSolverr discovery
+# ---------------------------------------------------------------------------
+
+
+def _probe_session(answers: dict[str, Any]) -> MagicMock:
+    """A session whose GET answers per address; anything absent is unreachable."""
+
+    def get(url: str, **_: Any) -> MagicMock:
+        base = url.removesuffix("/")
+        ctx = MagicMock()
+        if base not in answers:
+            ctx.__aenter__ = AsyncMock(side_effect=ClientError("refused"))
+        else:
+            resp = MagicMock()
+            resp.json = AsyncMock(return_value=answers[base])
+            ctx.__aenter__ = AsyncMock(return_value=resp)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        return ctx
+
+    session = MagicMock()
+    session.get = get
+    return session
+
+
+READY = {"msg": "FlareSolverr is ready!", "version": "3.5.2"}
+
+
+async def test_discovery_finds_the_first_candidate_that_answers(
+    hass: HomeAssistant, _no_solver_discovery
+) -> None:
+    session = _probe_session(
+        {"http://localhost:8191": READY, "http://host.docker.internal:8191": READY}
+    )
+
+    with patch(
+        "custom_components.mozillion.config_flow.async_get_clientsession",
+        return_value=session,
+    ):
+        found = await real_discover(hass)
+
+    assert found == "http://localhost:8191/v1"
+
+
+async def test_discovery_returns_nothing_when_no_one_answers(
+    hass: HomeAssistant,
+) -> None:
+    with patch(
+        "custom_components.mozillion.config_flow.async_get_clientsession",
+        return_value=_probe_session({}),
+    ):
+        assert await real_discover(hass) == ""
+
+
+async def test_discovery_ignores_other_services_on_the_port(
+    hass: HomeAssistant,
+) -> None:
+    session = _probe_session({"http://flaresolverr:8191": {"msg": "hello"}})
+
+    with patch(
+        "custom_components.mozillion.config_flow.async_get_clientsession",
+        return_value=session,
+    ):
+        assert await real_discover(hass) == ""
+
+
+async def test_a_block_suggests_the_address_that_answered(
+    hass: HomeAssistant, _no_solver_discovery
+) -> None:
+    _no_solver_discovery.return_value = "http://flaresolverr:8191/v1"
+    client = _mock_client(login_error=MozillionChallengeError("challenged"))
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+
+    key = next(k for k in result["data_schema"].schema if k == CONF_FLARESOLVERR_URL)
+    assert key.description == {"suggested_value": "http://flaresolverr:8191/v1"}
+    _no_solver_discovery.assert_awaited_once()
+
+
+async def test_a_typed_address_is_never_overwritten_by_a_suggestion(
+    hass: HomeAssistant, _no_solver_discovery
+) -> None:
+    _no_solver_discovery.return_value = "http://flaresolverr:8191/v1"
+    client = _mock_client()
+    client.async_login = AsyncMock(
+        side_effect=[
+            MozillionChallengeError("challenged"),
+            MozillionSolverError("down"),
+        ]
+    )
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            _login_input(**{CONF_FLARESOLVERR_URL: "http://mine:8191/v1"}),
+        )
+
+    key = next(k for k in result["data_schema"].schema if k == CONF_FLARESOLVERR_URL)
+    assert key.description == {"suggested_value": "http://mine:8191/v1"}
+    # Probed once, on the first block only.
+    _no_solver_discovery.assert_awaited_once()

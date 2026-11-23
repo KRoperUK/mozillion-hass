@@ -7,6 +7,7 @@ page, which is what lets one set of credentials cover every SIM.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import importlib.util
 import logging
@@ -14,6 +15,7 @@ from collections.abc import Mapping
 from types import ModuleType
 from typing import Any
 
+from aiohttp import ClientError, ClientSession, ClientTimeout
 from homeassistant import config_entries
 from homeassistant.config_entries import (
     ConfigEntry,
@@ -24,7 +26,10 @@ from homeassistant.config_entries import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import selector
-from homeassistant.helpers.aiohttp_client import async_create_clientsession
+from homeassistant.helpers.aiohttp_client import (
+    async_create_clientsession,
+    async_get_clientsession,
+)
 
 from .api import (
     MozillionAuthError,
@@ -52,6 +57,8 @@ from .const import (
     DEFAULT_ORIGIN,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    SOLVER_CANDIDATES,
+    SOLVER_PROBE_TIMEOUT,
     SUBENTRY_TYPE_SIM,
 )
 from .session import has_credentials
@@ -130,6 +137,36 @@ def _login_fields(
             selector.TextSelectorConfig(type=selector.TextSelectorType.URL)
         ),
     }
+
+
+async def _async_probe_solver(session: ClientSession, base: str) -> str | None:
+    """Return the FlareSolverr API address at ``base`` if one answers there."""
+
+    try:
+        async with session.get(
+            f"{base}/", timeout=ClientTimeout(total=SOLVER_PROBE_TIMEOUT)
+        ) as resp:
+            payload = await resp.json(content_type=None)
+    except (ClientError, TimeoutError, ValueError):
+        return None
+    if isinstance(payload, dict) and "FlareSolverr" in str(payload.get("msg", "")):
+        return f"{base}/v1"
+    return None
+
+
+async def _async_discover_solver(hass: HomeAssistant) -> str:
+    """Suggest where FlareSolverr is running, or "" when nothing answers.
+
+    Probes a short fixed list in parallel with a short timeout. A probe that
+    fails for any reason is simply a no, so this can never fail the flow. The
+    shared session is fine here: these requests carry no Mozillion cookies.
+    """
+
+    session = async_get_clientsession(hass)
+    found = await asyncio.gather(
+        *(_async_probe_solver(session, base) for base in SOLVER_CANDIDATES)
+    )
+    return next((url for url in found if url), "")
 
 
 def _solver_field(default: str = "") -> dict[Any, Any]:
@@ -317,6 +354,8 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
         # Set once Cloudflare blocks a login: the sign-in form then also offers a
         # FlareSolverr address, which is hidden until it is relevant.
         self._show_solver = False
+        # An address that answered when Cloudflare first blocked us; only suggested.
+        self._solver_suggestion = ""
         # Which sign-in form the user picked: "credentials" or "session".
         self._mode = "credentials"
         self._sims: list[MozillionSim] = []
@@ -418,7 +457,10 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
                 fields = _login_fields(self._pending, required=True)
                 if self._show_solver:
                     fields.update(
-                        _solver_field(self._pending.get(CONF_FLARESOLVERR_URL, ""))
+                        _solver_field(
+                            self._pending.get(CONF_FLARESOLVERR_URL, "")
+                            or self._solver_suggestion
+                        )
                     )
             return self.async_show_form(
                 step_id=step_id,
@@ -433,7 +475,11 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=schema.Schema(
                 {
                     **_login_fields(entry.data, required=False),
-                    **(_solver_field(stored) if self._show_solver or stored else {}),
+                    **(
+                        _solver_field(stored or self._solver_suggestion)
+                        if self._show_solver or stored
+                        else {}
+                    ),
                     **_session_fields(required=False, advanced=True),
                 }
             ),
@@ -500,7 +546,7 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
             )
         if error in _BLOCKED_ERRORS:
             # Not a credential problem, so go back to the form that can fix it.
-            self._show_solver = True
+            await self._async_flag_blocked(data)
             return self._main_form(kind, {"base": error})
         if error or result is None:
             errors = {"base": error or "cannot_connect"}
@@ -511,6 +557,13 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
         if kind == "user":
             return await self._async_continue_setup(result)
         return await self._async_save_entry(kind, result)
+
+    async def _async_flag_blocked(self, data: dict[str, Any]) -> None:
+        """Reveal the FlareSolverr field, suggesting an address the first time."""
+
+        if not self._show_solver and not data.get(CONF_FLARESOLVERR_URL):
+            self._solver_suggestion = await _async_discover_solver(self.hass)
+        self._show_solver = True
 
     async def _async_continue_setup(
         self, data: dict[str, Any]
@@ -533,7 +586,8 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
                 xsrf_token=self._xsrf_token,
             )
         except MozillionChallengeError:
-            self._show_solver = self._mode == "credentials"
+            if self._mode == "credentials":
+                await self._async_flag_blocked(data)
             return self._main_form("user", {"base": "cloudflare_blocked"})
         except RuntimeError:
             _LOGGER.exception(

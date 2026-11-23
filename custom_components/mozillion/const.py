@@ -35,6 +35,15 @@ CONF_FLARESOLVERR_URL = "flaresolverr_url"
 USAGE_POLL_ATTEMPTS = 5
 USAGE_POLL_DELAY = 3.0
 
+# Where FlareSolverr usually answers, probed once when Cloudflare blocks setup so
+# the form can suggest an address. A fixed list: nothing else is ever scanned.
+SOLVER_CANDIDATES = (
+    "http://flaresolverr:8191",
+    "http://localhost:8191",
+    "http://host.docker.internal:8191",
+)
+SOLVER_PROBE_TIMEOUT = 2  # seconds
+
 # Seconds FlareSolverr may spend clearing a challenge before we give up.
 SOLVER_TIMEOUT = 60
 
