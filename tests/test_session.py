@@ -9,7 +9,10 @@ from __future__ import annotations
 import time
 from unittest.mock import AsyncMock
 
-from custom_components.mozillion.const import AUTH_REFRESH_THRESHOLD
+from custom_components.mozillion.const import (
+    AUTH_REFRESH_THRESHOLD,
+    CLEARANCE_REFRESH_MARGIN,
+)
 from custom_components.mozillion.session import MozillionSession
 
 from tests.conftest import (
@@ -66,6 +69,47 @@ class TestNeedsAuthentication:
         )
 
         assert session.needs_authentication(entry) is True
+
+
+class TestClearanceRefresh:
+    """A solver's Cloudflare clearance is renewed before it lapses."""
+
+    def _session(self, expires_in: float | None) -> MozillionSession:
+        return MozillionSession(
+            cookie_header="c",
+            authenticated_at=time.monotonic(),
+            clearance_expires_at=None
+            if expires_in is None
+            else time.time() + expires_in,
+        )
+
+    def test_a_clearance_near_expiry_forces_a_login(self) -> None:
+        entry = _make_config_entry(data=MOCK_ENTRY_DATA_LOGIN)
+
+        assert self._session(CLEARANCE_REFRESH_MARGIN - 60).needs_authentication(entry)
+
+    def test_a_healthy_clearance_does_not(self) -> None:
+        entry = _make_config_entry(data=MOCK_ENTRY_DATA_LOGIN)
+
+        assert not self._session(CLEARANCE_REFRESH_MARGIN + 3600).needs_authentication(
+            entry
+        )
+
+    def test_no_clearance_means_no_behaviour_change(self) -> None:
+        entry = _make_config_entry(data=MOCK_ENTRY_DATA_LOGIN)
+
+        assert not self._session(None).needs_authentication(entry)
+
+    async def test_the_expiry_is_taken_from_the_client_after_login(self) -> None:
+        entry = _make_config_entry(data=MOCK_ENTRY_DATA_LOGIN)
+        client = AsyncMock()
+        client.async_login.return_value = ("fresh", "xsrf")
+        client.clearance_expires_at = 1234.5
+        session = MozillionSession()
+
+        await session.async_authenticate(client, entry)
+
+        assert session.clearance_expires_at == 1234.5
 
 
 class TestAuthenticate:

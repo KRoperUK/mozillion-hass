@@ -11,8 +11,8 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
+from ._compat import schema
 from .api import MozillionClient
-from .config_flow import schema
 from .const import CONF_FLARESOLVERR_URL, CONF_ORIGIN, DEFAULT_ORIGIN, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)

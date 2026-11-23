@@ -14,6 +14,7 @@ import base64
 import binascii
 import logging
 import re
+import time
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
@@ -26,6 +27,7 @@ from yarl import URL
 from .const import (
     BASE_URL,
     CHECK_BALANCE_PATH,
+    CLEARANCE_REFRESH_MARGIN,
     DASHBOARD_PATH,
     DATA_USAGE_PATH,
     DATA_USAGE_STATUS_PATH,
@@ -139,6 +141,9 @@ class MozillionClient:
         # Cloudflare ties its clearance cookie to the User-Agent that earned it,
         # so after a solve every request must present the solver's browser UA.
         self._user_agent = USER_AGENT
+        # Epoch seconds at which the solver's cf_clearance stops working, or
+        # None when unknown (no solve yet, or a session cookie with no expiry).
+        self.clearance_expires_at: float | None = None
 
     @property
     def has_solver(self) -> bool:
@@ -161,6 +166,17 @@ class MozillionClient:
 
         Returns ``(cookie_header, xsrf_header)``.
         """
+
+        if self.flaresolverr_url and self._clearance_expiring():
+            try:
+                await self.async_solve_challenge(origin)
+            except MozillionSolverError as err:
+                # The login may still work on the old clearance, so do not fail it
+                # here. Forget the expiry so a broken solver is not retried on
+                # every poll; the reactive path below takes over if Cloudflare
+                # does challenge.
+                _LOGGER.warning("Could not renew the Cloudflare clearance: %s", err)
+                self.clearance_expires_at = None
 
         try:
             return await self._async_login_once(email, password, totp_secret, origin)
@@ -221,6 +237,14 @@ class MozillionClient:
         )
         return cookie_header, xsrf
 
+    def _clearance_expiring(self) -> bool:
+        """Return True once the clearance is within the refresh margin of expiry."""
+
+        return (
+            self.clearance_expires_at is not None
+            and time.time() > self.clearance_expires_at - CLEARANCE_REFRESH_MARGIN
+        )
+
     async def async_solve_challenge(self, origin: str) -> None:
         """Clear Cloudflare's challenge through FlareSolverr.
 
@@ -264,6 +288,13 @@ class MozillionClient:
             raise MozillionSolverError(
                 "FlareSolverr finished without a cf_clearance cookie"
             )
+        clearance = next(c for c in cookies if c.get("name") == "cf_clearance")
+        # FlareSolverr names the field "expiry" (as Selenium does), and older
+        # builds "expires"; either may be -1 or absent for a session cookie.
+        expires = clearance.get("expiry", clearance.get("expires"))
+        self.clearance_expires_at = (
+            float(expires) if isinstance(expires, int | float) and expires > 0 else None
+        )
         for cookie in cookies:
             self._session.cookie_jar.update_cookies(
                 {cookie["name"]: cookie["value"]}, URL(origin)

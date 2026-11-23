@@ -45,6 +45,10 @@ DEFAULT_ORIGIN = BASE_URL
 # poll with an already-expired cookie/token.
 AUTH_REFRESH_THRESHOLD = 43200  # 12 hours, in seconds
 
+# With a FlareSolverr configured, renew Cloudflare's clearance this long before
+# it expires, so the expiry costs a quiet re-solve rather than a failed poll.
+CLEARANCE_REFRESH_MARGIN = 7200  # 2 hours, in seconds
+
 # The plan, SIM status and reset date come from a 355 KB dashboard page. None of
 # them change hourly (the reset label is monthly), so the page is refreshed on
 # its own slower cadence while the JSON usage and wallet calls keep the poll
