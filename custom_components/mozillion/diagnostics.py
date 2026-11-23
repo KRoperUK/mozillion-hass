@@ -14,6 +14,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import (
     CONF_EMAIL,
+    CONF_FLARESOLVERR_URL,
     CONF_ICCID,
     CONF_ORDER_DETAIL_ID,
     CONF_PASSWORD,
@@ -23,6 +24,7 @@ from .const import (
     CONF_TOTP_SECRET,
     CONF_XSRF_TOKEN,
 )
+from .session import has_credentials
 
 # Everything here identifies the account or lets someone else use the session.
 #
@@ -38,11 +40,21 @@ TO_REDACT = {
     CONF_ORDER_DETAIL_ID,
     CONF_SIM_META_ID,
     CONF_PASSWORD,
+    # An internal hostname or IP, so it identifies the user's network.
+    CONF_FLARESOLVERR_URL,
     CONF_SESSION_COOKIE,
     CONF_SIM_NUMBER,
     CONF_TOTP_SECRET,
     CONF_XSRF_TOKEN,
 }
+
+
+def _auth_method(entry: ConfigEntry) -> str:
+    """Say how the account signs in, without revealing any of it."""
+
+    if not has_credentials(entry):
+        return "session"
+    return "credentials+2fa" if entry.data.get(CONF_TOTP_SECRET) else "credentials"
 
 
 async def async_get_config_entry_diagnostics(
@@ -59,6 +71,13 @@ async def async_get_config_entry_diagnostics(
                 "version": entry.version,
                 "data": dict(entry.data),
                 "options": dict(entry.options),
+            },
+            # The first things needed when someone reports a login or Cloudflare
+            # problem: how the account signs in and whether a solver is in play.
+            "account": {
+                "auth_method": _auth_method(entry),
+                "solver_configured": bool(entry.data.get(CONF_FLARESOLVERR_URL)),
+                "challenge_issue_active": bool(runtime.session.challenge_issue_active),
             },
             "subentries": {
                 subentry_id: {

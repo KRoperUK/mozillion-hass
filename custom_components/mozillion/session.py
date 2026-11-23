@@ -18,6 +18,7 @@ from homeassistant.config_entries import ConfigEntry
 from .api import MozillionClient
 from .const import (
     AUTH_REFRESH_THRESHOLD,
+    CLEARANCE_REFRESH_MARGIN,
     CONF_EMAIL,
     CONF_ORIGIN,
     CONF_PASSWORD,
@@ -40,6 +41,9 @@ class MozillionSession:
     # proactively refresh an expiring session. None (unknown) forces a refresh when
     # credentials are present.
     authenticated_at: float | None = None
+    # When the solver's Cloudflare clearance stops working (epoch seconds), so the
+    # session can renew it before a poll is challenged. None when no solver is used.
+    clearance_expires_at: float | None = None
     # Whether a Cloudflare repair is outstanding for the account. Shared, so
     # whichever SIM polls successfully first can withdraw it.
     challenge_issue_active: bool = False
@@ -65,6 +69,11 @@ class MozillionSession:
         if not has_credentials(entry):
             return False
         if not self.cookie_header or self.authenticated_at is None:
+            return True
+        if (
+            self.clearance_expires_at is not None
+            and time.time() > self.clearance_expires_at - CLEARANCE_REFRESH_MARGIN
+        ):
             return True
         return (time.monotonic() - self.authenticated_at) > AUTH_REFRESH_THRESHOLD
 
@@ -93,6 +102,10 @@ class MozillionSession:
                 origin=entry.data.get(CONF_ORIGIN, DEFAULT_ORIGIN),
             )
             self.authenticated_at = time.monotonic()
+            expires = client.clearance_expires_at
+            self.clearance_expires_at = (
+                float(expires) if isinstance(expires, int | float) else None
+            )
             return True
 
     def adopt(self, cookie_header: str, xsrf_token: str | None) -> None:
