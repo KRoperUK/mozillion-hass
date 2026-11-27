@@ -9,9 +9,12 @@ from __future__ import annotations
 import time
 from unittest.mock import AsyncMock
 
+import pytest
+from custom_components.mozillion.api import MozillionChallengeError
 from custom_components.mozillion.const import (
     AUTH_REFRESH_THRESHOLD,
     CLEARANCE_REFRESH_MARGIN,
+    CONF_SESSION_COOKIE,
 )
 from custom_components.mozillion.session import MozillionSession
 
@@ -34,8 +37,10 @@ class TestFromEntry:
 
         assert session.cookie_header == "mozillion_session=abc; XSRF-TOKEN=xyz"
         assert session.xsrf_token == "xyz"
-        # Unknown until this integration authenticates, which forces a refresh.
+        # Never authenticated by this run, but presumed good until the server says
+        # otherwise, so a restart does not begin with a login.
         assert session.authenticated_at is None
+        assert session.unverified is True
 
     def test_empty_cookie_becomes_none(self) -> None:
         entry = _make_config_entry(data=MOCK_ENTRY_DATA_LOGIN)
@@ -69,6 +74,78 @@ class TestNeedsAuthentication:
         )
 
         assert session.needs_authentication(entry) is True
+
+
+class TestStoredSessionFirst:
+    """A login is for a session the server rejected, not for a restart."""
+
+    def test_a_stored_session_is_tried_before_logging_in(self) -> None:
+        entry = _make_config_entry(
+            data={**MOCK_ENTRY_DATA_LOGIN, CONF_SESSION_COOKIE: "stored=1"}
+        )
+
+        assert MozillionSession.from_entry(entry).needs_authentication(entry) is False
+
+    def test_no_stored_session_means_logging_in(self) -> None:
+        entry = _make_config_entry(data=MOCK_ENTRY_DATA_LOGIN)
+
+        assert MozillionSession.from_entry(entry).needs_authentication(entry) is True
+
+    def test_a_rejected_session_forces_a_login(self) -> None:
+        entry = _make_config_entry(
+            data={**MOCK_ENTRY_DATA_LOGIN, CONF_SESSION_COOKIE: "stored=1"}
+        )
+        session = MozillionSession.from_entry(entry)
+
+        session.invalidate()
+
+        assert session.needs_authentication(entry) is True
+
+    async def test_a_challenge_during_a_precautionary_refresh_keeps_the_session(
+        self,
+    ) -> None:
+        entry = _make_config_entry(data=MOCK_ENTRY_DATA_LOGIN)
+        client = AsyncMock()
+        client.async_login.side_effect = MozillionChallengeError("challenged")
+        session = MozillionSession(
+            cookie_header="held",
+            xsrf_token="x",
+            authenticated_at=time.monotonic() - (AUTH_REFRESH_THRESHOLD + 1),
+        )
+
+        assert await session.async_authenticate(client, entry) is False
+
+        assert session.cookie_header == "held"
+        # Not retried every poll: the next attempt is a full period away.
+        assert session.needs_authentication(entry) is False
+
+    async def test_a_challenge_during_a_forced_login_still_raises(self) -> None:
+        entry = _make_config_entry(data=MOCK_ENTRY_DATA_LOGIN)
+        client = AsyncMock()
+        client.async_login.side_effect = MozillionChallengeError("challenged")
+        session = MozillionSession(cookie_header="rejected", authenticated_at=1.0)
+        session.invalidate()
+
+        with pytest.raises(MozillionChallengeError):
+            await session.async_authenticate(client, entry)
+
+    async def test_a_challenge_with_no_session_at_all_still_raises(self) -> None:
+        entry = _make_config_entry(data=MOCK_ENTRY_DATA_LOGIN)
+        client = AsyncMock()
+        client.async_login.side_effect = MozillionChallengeError("challenged")
+
+        with pytest.raises(MozillionChallengeError):
+            await MozillionSession().async_authenticate(client, entry)
+
+    async def test_a_successful_login_clears_the_unverified_flag(self) -> None:
+        entry = _make_config_entry(data=MOCK_ENTRY_DATA_LOGIN)
+        client = AsyncMock()
+        client.async_login.return_value = ("fresh", "x")
+        session = MozillionSession(unverified=True)
+
+        await session.async_authenticate(client, entry)
+
+        assert session.unverified is False
 
 
 class TestClearanceRefresh:

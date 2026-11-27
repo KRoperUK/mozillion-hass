@@ -97,7 +97,8 @@
       "missing_auth": "Rhowch e-bost a chyfrinair, neu bennawd Cookie.",
       "invalid_totp": "Gwrthododd Mozillion y gyfrinach dau ffactor. Gludwch y gyfrinach Base32 neu'r ddolen otpauth:// eto.",
       "cloudflare_blocked": "Mae Cloudflare yn rhwystro mewngofnodi o'r rhwydwaith hwn. Rhowch gyfeiriad eich FlareSolverr isod, neu dechreuwch eto a defnyddio opsiwn sesiwn y porwr.",
-      "solver_failed": "Ni allai FlareSolverr glirio her Cloudflare. Gwiriwch y cyfeiriad, a'i fod yn rhedeg ar yr un rhwydwaith â Home Assistant."
+      "solver_failed": "Ni allai FlareSolverr glirio her Cloudflare. Gwiriwch y cyfeiriad, a'i fod yn rhedeg ar yr un rhwydwaith â Home Assistant.",
+      "cloudflare_blocked_cookie": "Mae Cloudflare yn rhwystro mewngofnodi o'r rhwydwaith hwn. Rhowch gyfeiriad FlareSolverr, neu gludwch bennawd Cookie wedi'i gopïo o borwr sydd wedi mewngofnodi i Mozillion."
     },
     "abort": {
       "reauth_successful": "Ail-ddilysu'n llwyddiannus.",

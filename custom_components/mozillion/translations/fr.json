@@ -97,7 +97,8 @@
       "missing_auth": "Saisissez une adresse e-mail et un mot de passe, ou un en-tête Cookie.",
       "invalid_totp": "Mozillion a refusé le secret à deux facteurs. Collez à nouveau le secret Base32 ou le lien otpauth://.",
       "cloudflare_blocked": "Cloudflare bloque la connexion depuis ce réseau. Saisissez ci-dessous l'adresse de FlareSolverr, ou recommencez avec l'option de session de navigateur.",
-      "solver_failed": "FlareSolverr n'a pas pu franchir le défi de Cloudflare. Vérifiez l'adresse, et qu'il tourne sur le même réseau que Home Assistant."
+      "solver_failed": "FlareSolverr n'a pas pu franchir le défi de Cloudflare. Vérifiez l'adresse, et qu'il tourne sur le même réseau que Home Assistant.",
+      "cloudflare_blocked_cookie": "Cloudflare bloque la connexion depuis ce réseau. Saisissez une adresse FlareSolverr, ou collez un en-tête Cookie copié depuis un navigateur connecté à Mozillion."
     },
     "abort": {
       "reauth_successful": "Réauthentification réussie.",

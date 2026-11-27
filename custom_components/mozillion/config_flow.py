@@ -499,7 +499,9 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
                         if self._show_solver or stored
                         else {}
                     ),
-                    **_session_fields(required=False, advanced=True),
+                    # Normally advanced-only, but once Cloudflare has blocked a
+                    # login this is the way round it, so it must be visible.
+                    **_session_fields(required=False, advanced=not self._show_solver),
                 }
             ),
             errors=errors,
@@ -546,6 +548,9 @@ class MozillionConfigFlow(ConfigFlow, domain=DOMAIN):
         if error in _BLOCKED_ERRORS:
             # Not a credential problem, so go back to the form that can fix it.
             await self._async_flag_blocked(data)
+            if kind != "user" and error == "cloudflare_blocked":
+                # These forms offer the cookie fields rather than a menu to go back to.
+                error = "cloudflare_blocked_cookie"
             return self._main_form(kind, {"base": error})
         if error or result is None:
             errors = {"base": error or "cannot_connect"}

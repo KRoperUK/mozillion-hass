@@ -97,7 +97,8 @@
       "missing_auth": "Cuir isteach ríomhphost agus pasfhocal, nó ceanntásc Cookie.",
       "invalid_totp": "Dhiúltaigh Mozillion don rún dhá fhachtóir. Greamaigh an rún Base32 nó an nasc otpauth:// arís.",
       "cloudflare_blocked": "Tá Cloudflare ag blocáil logáil isteach ón líonra seo. Cuir isteach seoladh do FlareSolverr thíos, nó tosaigh arís agus úsáid rogha seisiún an bhrabhsálaí.",
-      "solver_failed": "Níor éirigh le FlareSolverr dúshlán Cloudflare a ghlanadh. Seiceáil an seoladh, agus go bhfuil sé ar an líonra céanna le Home Assistant."
+      "solver_failed": "Níor éirigh le FlareSolverr dúshlán Cloudflare a ghlanadh. Seiceáil an seoladh, agus go bhfuil sé ar an líonra céanna le Home Assistant.",
+      "cloudflare_blocked_cookie": "Tá Cloudflare ag blocáil logáil isteach ón líonra seo. Cuir isteach seoladh FlareSolverr, nó greamaigh ceanntásc Cookie a cóipeáladh ó bhrabhsálaí atá logáilte isteach i Mozillion."
     },
     "abort": {
       "reauth_successful": "Athfhíorú déanta go rathúil.",

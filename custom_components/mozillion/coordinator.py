@@ -480,7 +480,7 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         _LOGGER.warning("Cloudflare challenged the poll; clearing it with FlareSolverr")
         try:
-            self.session.authenticated_at = None
+            self.session.invalidate()
             await self._async_refresh_auth()
             return await self._async_read_all()
         except MozillionAuthError as retry_error:
@@ -549,7 +549,7 @@ class MozillionCoordinator(DataUpdateCoordinator[CoordinatorData]):
         try:
             # Force the shared session to log in again: the cookie it holds was
             # just rejected, so waiting for the age threshold would keep failing.
-            self.session.authenticated_at = None
+            self.session.invalidate()
             await self._async_refresh_auth()
             if not self.session.cookie_header:
                 raise UpdateFailed(

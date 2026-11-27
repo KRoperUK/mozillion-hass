@@ -38,7 +38,9 @@ You need either the first option (recommended) or the second.
    Spaces, dashes and lower-case letters are tolerated.
 
 The integration logs in, answers the 2FA challenge, and refreshes the session on
-its own afterwards.
+its own afterwards. It tries the stored session first (so a restart does not log
+in again) and signs in only when Mozillion rejects it. If a routine renewal is
+blocked by Cloudflare, it keeps the session it has rather than failing the poll.
 
 ### If Cloudflare blocks sign-in
 
