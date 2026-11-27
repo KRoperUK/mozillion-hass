@@ -20,6 +20,7 @@ from custom_components.mozillion.const import (
     ATTR_PORT_STATUS,
     ATTR_SIM_STATUS,
     ATTR_USAGE,
+    AUTH_REFRESH_THRESHOLD,
     CONF_FLARESOLVERR_URL,
     CONF_ICCID,
     CONF_ORDER_DETAIL_ID,
@@ -204,7 +205,7 @@ async def test_failed_first_refresh_defers_setup(hass: HomeAssistant) -> None:
 
 async def test_bad_credentials_trigger_reauth(hass: HomeAssistant) -> None:
     """Rejected credentials must ask the user, not retry forever."""
-    entry = _entry(hass, email="user@example.com", password="wrong")
+    entry = _entry(hass, email="user@example.com", password="wrong", session_cookie="")
     client = _client(async_login=AsyncMock(side_effect=MozillionAuthError("nope")))
 
     with patch(CLIENT, return_value=client):
@@ -244,7 +245,9 @@ async def test_a_session_refresh_does_not_reload_the_entry(
     begins unauthenticated.
     """
 
-    entry = _entry(hass, email="user@example.com", password="secret123")
+    entry = _entry(
+        hass, email="user@example.com", password="secret123", session_cookie=""
+    )
     client = _client()
     # Setup logs in once; the forced refresh logs in again with new cookies, so
     # the entry write really does change its data. The third answer is only used
@@ -265,7 +268,10 @@ async def test_a_session_refresh_does_not_reload_the_entry(
         coordinator = _sim_coordinator(entry)
         assert entry.data[CONF_SESSION_COOKIE] == "initial"
         # Sets up the 12-hourly refresh on the next poll.
-        coordinator.session.authenticated_at = None
+        coordinator.session.unverified = False
+        coordinator.session.authenticated_at = time.monotonic() - (
+            AUTH_REFRESH_THRESHOLD + 1
+        )
         client.async_login.reset_mock()
 
         await coordinator.async_refresh()
@@ -352,8 +358,10 @@ async def test_coordinator_is_bound_to_the_entry(hass: HomeAssistant) -> None:
 
 
 async def test_setup_uses_the_configured_credentials(hass: HomeAssistant) -> None:
-    """A login entry must authenticate before its first poll."""
-    entry = _entry(hass, email="user@example.com", password="secret123")
+    """A login entry with no session must authenticate before its first poll."""
+    entry = _entry(
+        hass, email="user@example.com", password="secret123", session_cookie=""
+    )
     client = _client()
 
     with patch(CLIENT, return_value=client):
@@ -362,6 +370,45 @@ async def test_setup_uses_the_configured_credentials(hass: HomeAssistant) -> Non
 
     # Exactly one login: setup must not authenticate and then let the
     # coordinator's first refresh authenticate again.
+    client.async_login.assert_awaited_once()
+    assert entry.state is ConfigEntryState.LOADED
+
+
+async def test_a_stored_session_is_used_before_any_login(
+    hass: HomeAssistant,
+) -> None:
+    """A restart must not start with a login: Cloudflare challenges only that.
+
+    The stored cookie is tried first; the login is for a session the server
+    rejects.
+    """
+    entry = _entry(hass, email="user@example.com", password="secret123")
+    client = _client()
+
+    with patch(CLIENT, return_value=client):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    client.async_login.assert_not_awaited()
+    assert entry.state is ConfigEntryState.LOADED
+    assert client.async_get_usage.await_args.kwargs["cookie_header"] == (
+        "mozillion_session=abc; XSRF-TOKEN=xyz"
+    )
+
+
+async def test_a_rejected_stored_session_triggers_the_login(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry(hass, email="user@example.com", password="secret123")
+    client = _client()
+    client.async_get_usage = AsyncMock(
+        side_effect=[MozillionAuthError("expired"), MOCK_API_RESPONSE]
+    )
+
+    with patch(CLIENT, return_value=client):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
     client.async_login.assert_awaited_once()
     assert entry.state is ConfigEntryState.LOADED
 

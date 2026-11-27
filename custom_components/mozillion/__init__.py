@@ -186,8 +186,8 @@ async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     coordinator writes the refreshed session cookie back every time it logs in --
     twice a day at ``AUTH_REFRESH_THRESHOLD`` and again after a rejected cookie.
     Reloading for that tore the entities down mid-poll, discarded the in-flight
-    update and started a second login, because the reloaded session begins with
-    ``authenticated_at=None``.
+    update and started a second login, because a reloaded session has to be
+    re-established.
 
     So a bare credentials write is ignored, while the changes that really do
     alter the loaded result -- the SIM subentries and the options the coordinator

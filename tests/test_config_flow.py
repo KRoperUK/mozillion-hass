@@ -668,6 +668,56 @@ async def test_reauth_asks_for_a_new_secret_when_the_stored_one_is_rejected(
     assert entry.data[CONF_TOTP_SECRET] == "NEWSECRET"
 
 
+async def test_reauth_reveals_the_cookie_fields_when_cloudflare_blocks(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**MOCK_ENTRY_DATA_COOKIE, CONF_TOTP_SECRET: ""},
+        unique_id="7654321",
+        version=2,
+    )
+    entry.add_to_hass(hass)
+    client = _mock_client(login_error=MozillionChallengeError("blocked"))
+
+    def advanced(result: Any) -> dict[str, bool]:
+        return {
+            str(k): bool((k.description or {}).get("advanced"))
+            for k in result["data_schema"].schema
+        }
+
+    with patch(CLIENT, return_value=client):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_REAUTH,
+                "entry_id": entry.entry_id,
+            },
+        )
+        # Before a block the cookie fields are tucked away with the other advanced ones.
+        assert advanced(result)[CONF_SESSION_COOKIE] is True
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _credentials_only(_login_input())
+        )
+
+    assert result["errors"]["base"] == "cloudflare_blocked_cookie"
+    assert advanced(result)[CONF_SESSION_COOKIE] is False
+    assert CONF_FLARESOLVERR_URL in result["data_schema"].schema
+
+
+async def test_setup_keeps_the_menu_message_for_a_block(hass: HomeAssistant) -> None:
+    client = _mock_client(login_error=MozillionChallengeError("blocked"))
+
+    with patch(CLIENT, return_value=client):
+        result = await _start_user_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _login_input()
+        )
+
+    assert result["errors"]["base"] == "cloudflare_blocked"
+
+
 async def test_reauth_shows_invalid_auth_for_rejected_credentials(
     hass: HomeAssistant,
 ) -> None:
